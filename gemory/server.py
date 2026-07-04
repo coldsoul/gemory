@@ -16,17 +16,33 @@ import traceback
 
 # Ensure the project root is on sys.path so `from gemory.*` imports resolve
 # when running this script directly (e.g. `uv run gemory/server.py`).
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PROJECT_ROOT)
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
 
-from gemory.config import GEMORY_LOG_FILE, MEMORY_PATH
+from gemory.config import (
+    EMBEDDINGS_PATH,
+    GEMORY_LOG_FILE as _RAW_GEMORY_LOG_FILE,
+    MEMORY_PATH as _RAW_MEMORY_PATH,
+)
 from gemory.graph import GraphStore
 from gemory.llm import extract_facts
 from gemory.extractor import compute_source_id, store_facts
 from gemory.recall import recall
+
+# Resolve relative paths against the project root so the server works
+# regardless of what the calling process (e.g. Claude Desktop) sets as cwd.
+def _resolve_path(path: str) -> str:
+    """If *path* is relative, make it absolute against the project root."""
+    if os.path.isabs(path) or not path:
+        return path
+    return os.path.join(_PROJECT_ROOT, path)
+
+MEMORY_PATH = _resolve_path(_RAW_MEMORY_PATH)
+GEMORY_LOG_FILE = _resolve_path(_RAW_GEMORY_LOG_FILE)
 
 # ---------------------------------------------------------------------------
 # Logging (always to stderr so stdout is reserved for MCP protocol)
