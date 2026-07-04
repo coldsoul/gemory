@@ -4,10 +4,14 @@ Nodes carry content, confidence, provenance, and timestamps.
 Embeddings live in a separate JSON sidecar file -- never on the node itself.
 """
 
+import logging
+
 import json
 import os
 import uuid
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 import networkx as nx
 import numpy as np
@@ -75,6 +79,7 @@ class GraphStore:
         discarded.
         """
         if not os.path.exists(self._path):
+            logger.info("No memory file at %s, starting empty", self._path)
             self._graph = nx.DiGraph()
             self._embeddings = {}
             return
@@ -91,6 +96,11 @@ class GraphStore:
             # Only keep embeddings whose node still exists in the graph --
             # orphan embeddings are silently ignored.
             node_ids = set(self._graph.nodes())
+            orphans = len(raw) - len(node_ids & set(raw.keys()))
+            if orphans:
+                logger.info(
+                    "Discarded %d orphan embeddings (no matching node)", orphans,
+                )
             self._embeddings = {
                 k: v for k, v in raw.items() if k in node_ids
             }
@@ -98,10 +108,21 @@ class GraphStore:
         # Every node MUST have an embedding.
         for node_id in self._graph.nodes():
             if node_id not in self._embeddings:
+                logger.error(
+                    "Node %r has no embedding in sidecar (%s)",
+                    node_id,
+                    self._embeddings_path,
+                )
                 raise ValueError(
                     f"Node {node_id!r} exists in the memory graph but has no "
                     f"embedding in the sidecar ({self._embeddings_path})"
                 )
+
+        logger.info(
+            "Loaded graph: %d nodes, %d edges",
+            self._graph.number_of_nodes(),
+            self._graph.number_of_edges(),
+        )
 
     def save(self) -> None:
         """Atomically write graph + embeddings to disk.
@@ -121,6 +142,12 @@ class GraphStore:
         # Write both files atomically.
         _atomic_write_json(self._path, data)
         _atomic_write_json(self._embeddings_path, self._embeddings)
+
+        logger.info(
+            "Saved graph: %d nodes, %d edges",
+            self._graph.number_of_nodes(),
+            self._graph.number_of_edges(),
+        )
 
     # -- Node / edge operations --------------------------------------------
 
@@ -146,6 +173,9 @@ class GraphStore:
             level=0,
         )
         self._embeddings[node_id] = embedding
+        logger.info(
+            "Created node %s (confidence=%.1f)", node_id, config.CONFIDENCE_BASE,
+        )
         return node_id
 
     def add_edge(
@@ -157,6 +187,10 @@ class GraphStore:
     ) -> None:
         """Add a directed edge from *source* to *target*."""
         self._graph.add_edge(source, target, weight=weight, relation=relation)
+        logger.info(
+            "Added edge %s -> %s [weight=%.3f, relation=%s]",
+            source, target, weight, relation,
+        )
 
     # -- Query helpers -----------------------------------------------------
 
@@ -185,7 +219,13 @@ class GraphStore:
             similar.
         """
         if not self._embeddings:
+            logger.info("Similarity search against 0 embeddings, returning []")
             return []
+
+        logger.info(
+            "Similarity search against %d embeddings, threshold=%s, top_k=%d",
+            len(self._embeddings), threshold, top_k,
+        )
 
         query = np.array(embedding, dtype=float)
         query_norm = np.linalg.norm(query)
@@ -207,6 +247,7 @@ class GraphStore:
         if threshold is not None:
             results = [(nid, sim) for nid, sim in results if sim >= threshold]
 
+        logger.info("Found %d results", len(results))
         return results[:top_k]
 
     def get_node(self, node_id: str) -> Node:
@@ -215,6 +256,7 @@ class GraphStore:
         Raises :class:`KeyError` if the node does not exist.
         """
         if node_id not in self._graph:
+            logger.error("Node %r not found in graph", node_id)
             raise KeyError(node_id)
         attrs = self._graph.nodes[node_id]
         return Node(id=node_id, **attrs)
@@ -245,11 +287,20 @@ class GraphStore:
         attrs = self._graph.nodes[node_id]
         existing_ids = {p["source_id"] for p in attrs["provenance"]}
         if provenance["source_id"] in existing_ids:
+            logger.info(
+                "Source %s already recorded for node %s, skipping",
+                provenance["source_id"], node_id,
+            )
             return False
 
+        old_conf = attrs["confidence"]
         attrs["provenance"].append(provenance)
         attrs["confidence"] += config.CONFIDENCE_INCREMENT
         attrs["updated_at"] = _now_iso()
+        logger.info(
+            "Corroborated node %s (confidence: %.1f -> %.1f)",
+            node_id, old_conf, attrs["confidence"],
+        )
         return True
 
     def all_nodes(self) -> list[Node]:
