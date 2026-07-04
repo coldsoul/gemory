@@ -10,6 +10,7 @@ Exposes two tools over stdio transport:
 import asyncio
 import logging
 import os
+import signal
 import sys
 import traceback
 
@@ -201,17 +202,61 @@ async def _main_async() -> None:
         logger.error("Failed to load memory graph: %s", e)
         raise
 
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options(),
-        )
+    loop = asyncio.get_running_loop()
+    shutdown_event = asyncio.Event()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, shutdown_event.set)
+
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            server_task = asyncio.create_task(
+                server.run(
+                    read_stream,
+                    write_stream,
+                    server.create_initialization_options(),
+                ),
+            )
+
+            shutdown_task = asyncio.create_task(shutdown_event.wait())
+
+            done, pending = await asyncio.wait(
+                [server_task, shutdown_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if shutdown_event.is_set():
+                logger.info("Received shutdown signal, stopping server...")
+                server_task.cancel()
+                try:
+                    await asyncio.wait_for(server_task, timeout=3.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+            else:
+                # Server finished on its own — cancel the shutdown watcher
+                shutdown_task.cancel()
+                try:
+                    await shutdown_task
+                except asyncio.CancelledError:
+                    pass
+    except KeyboardInterrupt:
+        logger.info("Interrupted, shutting down...")
+    except asyncio.CancelledError:
+        pass
+    except BaseExceptionGroup:
+        # Suppress cascading cleanup errors from the stdio transport
+        # (e.g. anyio ExceptionGroup on stdin closure during shutdown).
+        logger.debug("Suppressed cleanup exception during shutdown")
+    finally:
+        logger.info("Gemory server stopped")
 
 
 def main():
     """Sync entry point for console script and direct invocation."""
-    asyncio.run(_main_async())
+    try:
+        asyncio.run(_main_async())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
