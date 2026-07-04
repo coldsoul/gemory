@@ -19,6 +19,11 @@ load_dotenv()
 MEMORY_PATH: str = os.getenv("MEMORY_PATH", "memory.json")
 EMBEDDINGS_PATH: str = os.getenv("EMBEDDINGS_PATH", "embeddings.json")
 
+# When set, server logs are written to this file in addition to stderr.
+# Useful when the server is run by an MCP client (e.g. Claude Desktop) that
+# hides stderr — tail -f this file to observe live logs.
+GEMORY_LOG_FILE: str = os.getenv("GEMORY_LOG_FILE", "")
+
 
 # ---------------------------------------------------------------------------
 # DeepSeek / LLM
