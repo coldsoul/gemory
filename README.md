@@ -42,6 +42,12 @@ See `.env.example` for all configurable options (thresholds, model names, paths)
 Start the MCP server on stdio:
 
 ```bash
+uv run gemory
+```
+
+Or without the console script (works without `uv sync`):
+
+```bash
 uv run gemory/server.py
 ```
 
@@ -60,7 +66,7 @@ client's MCP server configuration:
       "command": "uv",
       "args": [
         "run",
-        "gemory/server.py"
+        "gemory"
       ],
       "cwd": "/absolute/path/to/gemory"
     }
