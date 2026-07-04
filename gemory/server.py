@@ -1,12 +1,20 @@
 """MCP server for the Gemory memory system.
 
-Exposes two tools over stdio transport:
+Supports two transports:
 
-* ``remember`` -- extract durable facts from a conversation transcript and
+* **stdio** (default) — for use with Claude Desktop or any MCP host that
+  spawns a subprocess (calls ``main()`` with no flags).
+* **HTTP SSE** (``--http``) — for remote or browser-based clients.  Starts a
+  Starlette / Uvicorn server with ``/sse`` and ``/messages/`` endpoints.
+
+Tools
+-----
+* ``remember`` — extract durable facts from a conversation transcript and
   store them in the memory graph.
-* ``recall`` -- search the memory graph for facts relevant to a query.
+* ``recall`` — search the memory graph for facts relevant to a query.
 """
 
+import argparse
 import asyncio
 import logging
 import os
@@ -19,6 +27,7 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp.server import Server
+from mcp.server.sse import SseServerTransport
 from mcp.server.stdio import stdio_server
 from mcp import types
 
@@ -251,10 +260,89 @@ async def _main_async() -> None:
         logger.info("Gemory server stopped")
 
 
-def main():
-    """Sync entry point for console script and direct invocation."""
+async def _main_http_async(host: str = "127.0.0.1", port: int = 8765) -> None:
+    """Load the memory graph and start the MCP server over HTTP SSE."""
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    logger.info("Starting Gemory MCP server (HTTP SSE)")
+
     try:
-        asyncio.run(_main_async())
+        graph.load()
+        node_count = len(graph.all_nodes())
+        logger.info("Loaded memory graph with %d nodes", node_count)
+    except Exception as e:
+        logger.error("Failed to load memory graph: %s", e)
+        raise
+
+    sse = SseServerTransport("/messages/")
+
+    async def handle_sse(request):
+        async with sse.connect_sse(
+            request.scope, request.receive, request._send,
+        ) as (read_stream, write_stream):
+            await server.run(
+                read_stream,
+                write_stream,
+                server.create_initialization_options(),
+            )
+
+    app = Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse),
+            Route("/messages/", endpoint=sse.handle_post_message, methods=["POST"]),
+        ],
+    )
+
+    import uvicorn
+
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    http_server = uvicorn.Server(config)
+
+    logger.info("MCP server listening on http://%s:%d/sse", host, port)
+    logger.info("Messages endpoint: http://%s:%d/messages/", host, port)
+
+    try:
+        await http_server.serve()
+    except KeyboardInterrupt:
+        logger.info("Interrupted, shutting down...")
+    except asyncio.CancelledError:
+        pass
+    finally:
+        logger.info("Gemory server stopped")
+
+
+def main():
+    """Sync entry point for console script and direct invocation.
+
+    Parses ``--http`` (optional) to switch between stdio and HTTP SSE
+    transport.  Use ``--host`` and ``--port`` to configure the HTTP
+    listener address (default: ``127.0.0.1:8765``).
+    """
+    parser = argparse.ArgumentParser(description="Gemory MCP server")
+    parser.add_argument(
+        "--http",
+        action="store_true",
+        help="Use HTTP SSE transport instead of stdio (default: stdio)",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host for HTTP transport (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Port for HTTP transport (default: 8765)",
+    )
+    args = parser.parse_args()
+
+    try:
+        if args.http:
+            asyncio.run(_main_http_async(args.host, args.port))
+        else:
+            asyncio.run(_main_async())
     except KeyboardInterrupt:
         pass
 

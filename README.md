@@ -39,16 +39,24 @@ See `.env.example` for all configurable options (thresholds, model names, paths)
 
 ## Run
 
-Start the MCP server on stdio:
+The server supports two transports:
 
-```bash
-uv run gemory
-```
-
-Or without the console script (works without `uv sync`):
+### Stdio (default)
 
 ```bash
 uv run gemory/server.py
+```
+
+### HTTP SSE
+
+```bash
+uv run gemory/server.py --http
+```
+
+Starts on `http://127.0.0.1:8765`. Use `--host` and `--port` to change:
+
+```bash
+uv run gemory/server.py --http --port 9000
 ```
 
 The server loads `memory.json` and `embeddings.json` from the current directory.
@@ -56,25 +64,51 @@ If they don't exist, it starts with an empty graph.
 
 ## MCP client registration
 
-To register Gemory with an MCP client (Claude Desktop, etc.), add this to your
-client's MCP server configuration:
+### Option A: HTTP (recommended for debugging)
+
+Run the server in a terminal:
+
+```bash
+uv run gemory/server.py --http
+```
+
+Then in Claude Desktop, use the URL field: `http://127.0.0.1:8765/sse`
+
+Or in `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "gemory": {
-      "command": "uv",
-      "args": [
-        "run",
-        "gemory"
-      ],
-      "cwd": "/absolute/path/to/gemory"
+      "url": "http://127.0.0.1:8765/sse"
     }
   }
 }
 ```
 
-For Claude Desktop, this goes in `claude_desktop_config.json` (location varies by platform):
+### Option B: Stdio
+
+Claude Desktop runs the server as a subprocess.
+
+In `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "gemory": {
+      "command": "/absolute/path/to/gemory/.venv/bin/python",
+      "args": [
+        "/absolute/path/to/gemory/gemory/server.py"
+      ],
+      "env": {
+        "GEMORY_LOG_FILE": "/absolute/path/to/gemory/gemory.log"
+      }
+    }
+  }
+}
+```
+
+For Claude Desktop, the config file location is:
 
 - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
