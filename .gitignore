@@ -18,3 +18,7 @@ build/
 # Runtime
 memory.json
 embeddings.json
+gemory.log
+
+# pyvis auto-downloaded dependencies
+lib/
