@@ -22,7 +22,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
 
-from gemory.config import MEMORY_PATH
+from gemory.config import GEMORY_LOG_FILE, MEMORY_PATH
 from gemory.graph import GraphStore
 from gemory.llm import extract_facts
 from gemory.extractor import compute_source_id, store_facts
@@ -37,6 +37,12 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     stream=sys.stderr,
 )
+
+if GEMORY_LOG_FILE:
+    _fh = logging.FileHandler(GEMORY_LOG_FILE)
+    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logging.getLogger().addHandler(_fh)
+    logging.getLogger("gemory.server").info("Logging to %s", GEMORY_LOG_FILE)
 logger = logging.getLogger("gemory.server")
 
 # ---------------------------------------------------------------------------
