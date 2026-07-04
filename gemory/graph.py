@@ -1,0 +1,259 @@
+"""GraphStore: persistent DiGraph with an embedding sidecar.
+
+Nodes carry content, confidence, provenance, and timestamps.
+Embeddings live in a separate JSON sidecar file -- never on the node itself.
+"""
+
+import json
+import os
+import uuid
+from datetime import datetime, timezone
+
+import networkx as nx
+import numpy as np
+
+from gemory import config
+from gemory.models import Node
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    """Current UTC time as an ISO-8601 string."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _atomic_write_json(path: str, data) -> None:
+    """Atomically write *data* as pretty-printed JSON to *path*.
+
+    The file is first written to a ``.tmp`` sibling and then moved into
+    place with :func:`os.replace` so that concurrent readers always see a
+    complete file.
+    """
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+    os.replace(tmp_path, path)
+
+
+# ---------------------------------------------------------------------------
+# GraphStore
+# ---------------------------------------------------------------------------
+
+class GraphStore:
+    """Directed graph memory backed by two JSON files:
+
+    * **memory.json** -- the graph structure (nodes + edges) via
+      :func:`networkx.node_link_data`.
+    * **embeddings.json** -- a flat dict ``{node_id: list[float]}`` sidecar.
+
+    The sidecar is derived from :data:`config.EMBEDDINGS_PATH` and lives in
+    the same directory as the memory file.
+    """
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        dir_name = os.path.dirname(path)
+        if dir_name:
+            self._embeddings_path = os.path.join(dir_name, config.EMBEDDINGS_PATH)
+        else:
+            self._embeddings_path = config.EMBEDDINGS_PATH
+        self._graph: nx.DiGraph = nx.DiGraph()
+        self._embeddings: dict[str, list[float]] = {}
+
+    # -- Persistence -------------------------------------------------------
+
+    def load(self) -> None:
+        """Load graph + embeddings from disk.
+
+        If **memory.json** does not exist the graph starts empty (no error).
+        If it does exist every node **must** have a matching embedding in the
+        sidecar or a :class:`ValueError` is raised.  Orphan embeddings
+        (embedding keys that do not correspond to any node) are silently
+        discarded.
+        """
+        if not os.path.exists(self._path):
+            self._graph = nx.DiGraph()
+            self._embeddings = {}
+            return
+
+        with open(self._path) as f:
+            data = json.load(f)
+        self._graph = nx.node_link_graph(data, directed=True, multigraph=False)
+
+        # Load embeddings sidecar.
+        self._embeddings = {}
+        if os.path.exists(self._embeddings_path):
+            with open(self._embeddings_path) as f:
+                raw = json.load(f)
+            # Only keep embeddings whose node still exists in the graph --
+            # orphan embeddings are silently ignored.
+            node_ids = set(self._graph.nodes())
+            self._embeddings = {
+                k: v for k, v in raw.items() if k in node_ids
+            }
+
+        # Every node MUST have an embedding.
+        for node_id in self._graph.nodes():
+            if node_id not in self._embeddings:
+                raise ValueError(
+                    f"Node {node_id!r} exists in the memory graph but has no "
+                    f"embedding in the sidecar ({self._embeddings_path})"
+                )
+
+    def save(self) -> None:
+        """Atomically write graph + embeddings to disk.
+
+        Embeddings are **never** stored inside ``memory.json`` -- they are
+        written exclusively to the sidecar file.
+        """
+        # Serialise graph structure via networkx (no embeddings here).
+        data = nx.node_link_data(self._graph)
+
+        # Safety: strip any stray embedding-related keys from node data.
+        for node_entry in data.get("nodes", []):
+            for key in list(node_entry.keys()):
+                if "embedding" in key.lower():
+                    del node_entry[key]
+
+        # Write both files atomically.
+        _atomic_write_json(self._path, data)
+        _atomic_write_json(self._embeddings_path, self._embeddings)
+
+    # -- Node / edge operations --------------------------------------------
+
+    def add_node(
+        self,
+        content: str,
+        embedding: list[float],
+        provenance: dict,
+    ) -> str:
+        """Create a new node in the graph.
+
+        Returns the auto-generated UUID4 node id.
+        """
+        node_id = str(uuid.uuid4())
+        now = _now_iso()
+        self._graph.add_node(
+            node_id,
+            content=content,
+            confidence=config.CONFIDENCE_BASE,
+            provenance=[provenance],
+            created_at=now,
+            updated_at=now,
+            level=0,
+        )
+        self._embeddings[node_id] = embedding
+        return node_id
+
+    def add_edge(
+        self,
+        source: str,
+        target: str,
+        weight: float,
+        relation: str = "related",
+    ) -> None:
+        """Add a directed edge from *source* to *target*."""
+        self._graph.add_edge(source, target, weight=weight, relation=relation)
+
+    # -- Query helpers -----------------------------------------------------
+
+    def find_similar(
+        self,
+        embedding: list[float],
+        threshold: float | None = None,
+        top_k: int = 10,
+    ) -> list[tuple[str, float]]:
+        """Cosine-similarity search against all stored embeddings.
+
+        Parameters
+        ----------
+        embedding
+            Query vector.
+        threshold
+            Minimum similarity to include in results.  When ``None`` (default)
+            **all** nodes are returned (sorted descending).
+        top_k
+            Maximum number of results to return.
+
+        Returns
+        -------
+        list[tuple[str, float]]
+            ``(node_id, cosine_similarity)`` pairs sorted from most to least
+            similar.
+        """
+        if not self._embeddings:
+            return []
+
+        query = np.array(embedding, dtype=float)
+        query_norm = np.linalg.norm(query)
+        if query_norm == 0:
+            return []
+        query_normalised = query / query_norm
+
+        results: list[tuple[str, float]] = []
+        for nid, emb in self._embeddings.items():
+            emb_arr = np.array(emb, dtype=float)
+            norm = np.linalg.norm(emb_arr)
+            if norm == 0:
+                continue
+            similarity = float(np.dot(emb_arr / norm, query_normalised))
+            results.append((nid, similarity))
+
+        results.sort(key=lambda x: x[1], reverse=True)
+
+        if threshold is not None:
+            results = [(nid, sim) for nid, sim in results if sim >= threshold]
+
+        return results[:top_k]
+
+    def get_node(self, node_id: str) -> Node:
+        """Return the :class:`Node` dataclass for *node_id*.
+
+        Raises :class:`KeyError` if the node does not exist.
+        """
+        if node_id not in self._graph:
+            raise KeyError(node_id)
+        attrs = self._graph.nodes[node_id]
+        return Node(id=node_id, **attrs)
+
+    def get_neighbors(self, node_id: str) -> list[str]:
+        """Return the list of successor node ids (outgoing edges)."""
+        return list(self._graph.successors(node_id))
+
+    def get_roots(self) -> list[str]:
+        """Return nodes with no incoming edges (in-degree == 0)."""
+        return [n for n in self._graph.nodes() if self._graph.in_degree(n) == 0]
+
+    def bump_confidence(self, node_id: str, provenance: dict) -> bool:
+        """Corroborate a node from a new source.
+
+        If ``provenance["source_id"]`` is already present in the node's
+        provenance list the operation is idempotent -- returns ``False``.
+
+        Otherwise the provenance dict is appended, confidence is incremented
+        by :data:`config.CONFIDENCE_INCREMENT`, and ``updated_at`` is set to
+        now.
+
+        Returns
+        -------
+        bool
+            ``True`` if the node was actually updated.
+        """
+        attrs = self._graph.nodes[node_id]
+        existing_ids = {p["source_id"] for p in attrs["provenance"]}
+        if provenance["source_id"] in existing_ids:
+            return False
+
+        attrs["provenance"].append(provenance)
+        attrs["confidence"] += config.CONFIDENCE_INCREMENT
+        attrs["updated_at"] = _now_iso()
+        return True
+
+    def all_nodes(self) -> list[Node]:
+        """Return every :class:`Node` currently in the graph."""
+        return [
+            Node(id=nid, **attrs) for nid, attrs in self._graph.nodes(data=True)
+        ]
