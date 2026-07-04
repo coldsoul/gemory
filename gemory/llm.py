@@ -4,7 +4,11 @@ Uses the OpenAI-compatible API exposed by DeepSeek for both chat completion
 (extract_facts) and embeddings (embed / embed_batch).
 """
 
+import logging
+
 import json
+
+logger = logging.getLogger(__name__)
 
 import openai
 
@@ -101,6 +105,10 @@ def _parse_facts_response(content: str) -> list[str]:
                 pass
 
     # ── All attempts exhausted ────────────────────────────────────────
+    logger.error(
+        "Could not parse LLM response as JSON array. Raw response: %s",
+        content[:500],
+    )
     raise ValueError(
         f"Could not parse LLM response as a JSON array of strings.\n"
         f"Raw response:\n{content}"
@@ -126,25 +134,34 @@ def extract_facts(transcript: str) -> list[str]:
     ValueError
         Response could not be parsed as a JSON array of strings.
     """
+    logger.info("Extracting facts from transcript (%d chars)", len(transcript))
+
     client = openai.OpenAI(
         base_url=config.DEEPSEEK_BASE_URL,
         api_key=config.DEEPSEEK_API_KEY,
     )
 
-    response = client.chat.completions.create(
-        model=config.DEEPSEEK_CHAT_MODEL,
-        messages=[
-            {"role": "system", "content": _EXTRACTION_PROMPT},
-            {"role": "user", "content": transcript},
-        ],
-    )
+    try:
+        response = client.chat.completions.create(
+            model=config.DEEPSEEK_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": _EXTRACTION_PROMPT},
+                {"role": "user", "content": transcript},
+            ],
+        )
+    except Exception:
+        logger.exception("Fact extraction failed")
+        raise
 
     raw = response.choices[0].message.content
-    return _parse_facts_response(raw)
+    facts = _parse_facts_response(raw)
+    logger.info("Extracted %d facts", len(facts))
+    return facts
 
 
 def embed(text: str) -> list[float]:
     """Embed a single *text* string and return its vector."""
+    logger.info("Embedding text (%d chars)", len(text))
     client = openai.OpenAI(
         base_url=config.EMBEDDING_BASE_URL,
         api_key=config.EMBEDDING_API_KEY,
@@ -164,8 +181,10 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
     The output order matches the input order.
     """
     if not texts:
+        logger.info("embed_batch called with empty input, returning []")
         return []
 
+    logger.info("Embedding %d texts", len(texts))
     client = openai.OpenAI(
         base_url=config.EMBEDDING_BASE_URL,
         api_key=config.EMBEDDING_API_KEY,
