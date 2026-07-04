@@ -135,6 +135,12 @@ def extract_facts(transcript: str) -> list[str]:
         Response could not be parsed as a JSON array of strings.
     """
     logger.info("Extracting facts from transcript (%d chars)", len(transcript))
+    logger.info(
+        "LLM request: model=%s base_url=%s transcript_preview=%r",
+        config.DEEPSEEK_CHAT_MODEL,
+        config.DEEPSEEK_BASE_URL,
+        transcript[:300],
+    )
 
     client = openai.OpenAI(
         base_url=config.DEEPSEEK_BASE_URL,
@@ -154,6 +160,19 @@ def extract_facts(transcript: str) -> list[str]:
         raise
 
     raw = response.choices[0].message.content
+    usage = response.usage
+    if usage:
+        logger.info(
+            "LLM response: tokens(prompt=%d, completion=%d, total=%d) "
+            "raw=%r",
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.total_tokens,
+            raw[:500] if raw else None,
+        )
+    else:
+        logger.info("LLM response: raw=%r", raw[:500] if raw else None)
+
     facts = _parse_facts_response(raw)
     logger.info("Extracted %d facts", len(facts))
     return facts
