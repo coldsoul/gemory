@@ -63,12 +63,10 @@ client's MCP server configuration:
 {
   "mcpServers": {
     "gemory": {
-      "command": "uv",
+      "command": "/absolute/path/to/gemory/.venv/bin/python",
       "args": [
-        "run",
-        "gemory/server.py"
+        "/absolute/path/to/gemory/gemory/server.py"
       ],
-      "cwd": "/absolute/path/to/gemory",
       "env": {
         "GEMORY_LOG_FILE": "/absolute/path/to/gemory/gemory.log"
       }
