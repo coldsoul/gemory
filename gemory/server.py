@@ -229,13 +229,24 @@ async def _main_async() -> None:
                 logger.info("Received shutdown signal, stopping server...")
                 server_task.cancel()
                 try:
-                    await server_task
+                    await asyncio.wait_for(server_task, timeout=3.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+            else:
+                # Server finished on its own — cancel the shutdown watcher
+                shutdown_task.cancel()
+                try:
+                    await shutdown_task
                 except asyncio.CancelledError:
                     pass
     except KeyboardInterrupt:
         logger.info("Interrupted, shutting down...")
     except asyncio.CancelledError:
         pass
+    except BaseExceptionGroup:
+        # Suppress cascading cleanup errors from the stdio transport
+        # (e.g. anyio ExceptionGroup on stdin closure during shutdown).
+        logger.debug("Suppressed cleanup exception during shutdown")
     finally:
         logger.info("Gemory server stopped")
 
