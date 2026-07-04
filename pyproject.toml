@@ -1,0 +1,20 @@
+[project]
+name = "gemory"
+version = "0.1.0"
+description = "Graph-based long-term memory for LLM agents via MCP"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+    "networkx>=3.0",
+    "openai>=1.0.0",
+    "numpy>=1.26.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
