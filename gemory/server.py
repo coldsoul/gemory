@@ -9,8 +9,13 @@ Exposes two tools over stdio transport:
 
 import asyncio
 import logging
+import os
 import sys
 import traceback
+
+# Ensure the project root is on sys.path so `from gemory.*` imports resolve
+# when running this script directly (e.g. `uv run gemory/server.py`).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -184,7 +189,7 @@ async def _handle_recall(arguments: dict) -> list[types.TextContent]:
 # Entry point
 # ---------------------------------------------------------------------------
 
-async def main() -> None:
+async def _main_async() -> None:
     """Load the memory graph and start the MCP server over stdio."""
     logger.info("Starting Gemory MCP server")
 
@@ -204,5 +209,10 @@ async def main() -> None:
         )
 
 
+def main():
+    """Sync entry point for console script and direct invocation."""
+    asyncio.run(_main_async())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
