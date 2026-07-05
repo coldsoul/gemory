@@ -1,0 +1,13 @@
+User: I started a side project called Gemory — it's an AI agent memory system.
+
+Assistant: That's cool. What's the core idea?
+
+User: It's a graph-based long-term memory. Facts get extracted from conversation transcripts, deduplicated by embedding similarity, and connected into a knowledge graph. The whole thing is inspectable because the graph is just a JSON file.
+
+Assistant: How are you building it?
+
+User: Python, with networkx for the graph and DeepSeek for the LLM calls. I'm running it on a VPS so it's always available.
+
+Assistant: What made you choose a VPS over something like a cloud function?
+
+User: I work on a VPS because I want full control over the environment. No cold starts, no platform quirks. Just a Debian box I can SSH into.

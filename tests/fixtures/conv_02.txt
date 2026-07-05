@@ -1,0 +1,13 @@
+User: Can you help me set up a project structure for my long-term memory tool?
+
+Assistant: Sure. What's the project called and what stack are you using?
+
+User: Gemory is my long-term memory project. I'm keeping it minimal — just Python, networkx, and an LLM API. I use uv for package management.
+
+Assistant: What about deployment? Where do you run this?
+
+User: I run my code on a virtual private server. I prefer minimal, inspectable implementations over big frameworks so I can understand every piece.
+
+Assistant: Any hobbies outside of coding?
+
+User: I fly FPV drones on weekends. It's a nice break from staring at code.

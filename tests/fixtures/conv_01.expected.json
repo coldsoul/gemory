@@ -1,0 +1,7 @@
+{
+  "source_id_note": "hash of first exchange; asserted equal to conv_01_grown, conv_whitespace",
+  "facts": [
+    "The user is building a memory system called Gemory.",
+    "The user works on a VPS."
+  ]
+}

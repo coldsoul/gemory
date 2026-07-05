@@ -1,0 +1,21 @@
+User: I've been working on a new project called Gemory. It's a memory system for AI agents.
+
+Assistant: That sounds interesting. What's the core idea behind it?
+
+User: It's a graph-based long-term memory. Facts get extracted from conversation transcripts, deduplicated by embedding similarity, and connected into a knowledge graph. The whole thing is inspectable because the graph is just a JSON file.
+
+Assistant: How are you building it?
+
+User: Python, with networkx for the graph and DeepSeek for the LLM calls. I'm running it on a VPS so it's always available.
+
+Assistant: What made you choose a VPS over something like a cloud function?
+
+User: I work on a VPS because I want full control over the environment. No cold starts, no platform quirks. Just a Debian box I can SSH into.
+
+Assistant: Got it. What's next on the roadmap?
+
+User: I want to add a consolidation process that runs periodically and clusters related facts into higher-level abstractions. Like a background dreamer that builds a hierarchy from the flat graph.
+
+Assistant: That sounds ambitious. Any constraints on the implementation?
+
+User: It has to stay simple. The graph must always be human-readable JSON, and every transformation must be reversible or at least audit-friendly.

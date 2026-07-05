@@ -1,0 +1,13 @@
+{
+  "facts": [
+    "Gemory is the user's long-term memory project.",
+    "The user runs their code on a virtual private server.",
+    "The user prefers minimal, inspectable implementations.",
+    "The user uses uv for package management.",
+    "The user flies FPV drones."
+  ],
+  "corroborates": {
+    "Gemory is the user's long-term memory project.": "The user is building a memory system called Gemory.",
+    "The user runs their code on a virtual private server.": "The user works on a VPS."
+  }
+}

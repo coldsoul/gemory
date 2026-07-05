@@ -1,0 +1,5 @@
+User: Hello!
+
+Assistant: Hi there! How can I help you today?
+
+User: Just saying hi, nothing important. How's the weather?
