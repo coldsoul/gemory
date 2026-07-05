@@ -22,3 +22,9 @@ gemory.log
 
 # pyvis auto-downloaded dependencies
 lib/
+
+# macOS
+.DS_Store
+
+# nwave
+.nwave/
