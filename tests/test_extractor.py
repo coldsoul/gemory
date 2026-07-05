@@ -222,10 +222,11 @@ class TestStoreFacts:
         """New fact similarity is above EDGE_THRESHOLD but below
         DEDUP_THRESHOLD → new node + edge created."""
         # existing: [1,0,0]
-        # new:      [0.8, 0.6, 0]    cosine = 0.8
+        # new:      [0.78, 0.626, 0]    cosine ≈ 0.78
+        # (below DEDUP_THRESHOLD=0.80 from .env, above EDGE_THRESHOLD=0.75)
         mock_embed.side_effect = _embed_side_effect({
             "Existing": [1.0, 0.0, 0.0],
-            "NewClose": [0.8, 0.6, 0.0],
+            "NewClose": [0.78, 0.62578, 0.0],
         })
 
         # Seed one existing node
