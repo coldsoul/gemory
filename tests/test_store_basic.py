@@ -32,7 +32,8 @@ class TestFreshStore:
         source_id = "test-src-fresh"
         label = "test"
 
-        result = store_facts(facts, source_id, label, empty_graph)
+        fact_items = [{"fact": f, "topic": ""} for f in facts]
+        result = store_facts(fact_items, source_id, label, empty_graph)
 
         assert result["facts_extracted"] == len(facts)
         assert result["new_nodes"] == len(facts)
@@ -59,8 +60,8 @@ class TestMemoryJsonNoEmbeddings:
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         graph = GraphStore(tmp_graph_path)
-        facts = _load_expected("conv_01.expected.json")
-        store_facts(facts, "test-src", None, graph)
+        raw_facts = _load_expected("conv_01.expected.json")
+        store_facts([{"fact": f, "topic": ""} for f in raw_facts], "test-src", None, graph)
 
         # Read memory.json raw
         with open(tmp_graph_path) as f:

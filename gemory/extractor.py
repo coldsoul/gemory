@@ -143,12 +143,15 @@ def compute_source_id(transcript: str) -> str:
 
 
 def store_facts(
-    facts: list[str],
+    facts: list[dict[str, str]],
     source_id: str,
     label: str | None,
     graph: GraphStore,
 ) -> dict[str, int]:
     """Embed, deduplicate, and store *facts* into *graph*.
+
+    Each element of *facts* is ``{"fact": "...", "topic": "..."}`` where
+    ``"topic"`` is optional (defaults to ``""``).
 
     Steps for each fact
     -------------------
@@ -162,7 +165,8 @@ def store_facts(
     Parameters
     ----------
     facts
-        Fact strings from :func:`gemory.llm.extract_facts`.
+        List of dicts with keys ``"fact"`` (required) and ``"topic"`` (optional),
+        as returned by :func:`gemory.llm.extract_facts`.
     source_id
         Stable source identifier (e.g. from :func:`compute_source_id`).
     label
@@ -185,8 +189,14 @@ def store_facts(
         "skipped": 0,
     }
 
-    for fact in facts:
-        embedding = llm.embed(fact)
+    for fact_item in facts:
+        fact_text = fact_item["fact"]
+        topic_text = fact_item.get("topic", "")
+
+        if topic_text:
+            logger.info("Fact topic: %r", topic_text)
+
+        embedding = llm.embed(fact_text)
         provenance = {
             "source_id": source_id,
             "label": label or "",
@@ -207,7 +217,7 @@ def store_facts(
                 logger.info("Skipped: %s", node_id)
         else:
             new_id = graph.add_node(
-                content=fact, embedding=embedding, provenance=provenance,
+                content=fact_text, embedding=embedding, provenance=provenance,
                 kind="fact", label="",
             )
             counts["new_nodes"] += 1

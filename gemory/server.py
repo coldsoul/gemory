@@ -159,7 +159,8 @@ async def _handle_remember(arguments: dict) -> list[types.TextContent]:
 
     try:
         facts = extract_facts(transcript)
-        logger.info("Extracted %d facts", len(facts))
+        topics_count = sum(1 for f in facts if f.get("topic"))
+        logger.info("Extracted %d facts (%d with topics)", len(facts), topics_count)
 
         source_id = compute_source_id(transcript)
         logger.info("Computed source_id=%s", source_id)
