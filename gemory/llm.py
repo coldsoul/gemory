@@ -24,8 +24,21 @@ _EXTRACTION_PROMPT = (
     "transcript of a conversation between a user and an assistant. Your job is to\n"
     "extract durable, atomic facts worth remembering about the user and their world.\n"
     "\n"
-    "Output ONLY a JSON array of strings. No prose, no explanation, no markdown code\n"
+    "Output ONLY a JSON array of objects. No prose, no explanation, no markdown code\n"
     "fences. If there are no facts worth storing, output [].\n"
+    "\n"
+    "Each object must have exactly two keys: \"fact\" and \"topic\".\n"
+    "- \"fact\": the atomic fact statement (see rules below).\n"
+    "- \"topic\": a short (2-5 word) noun phrase naming the SUBJECT the fact is\n"
+    "  about -- the project, entity, or area -- not a restatement of the fact.\n"
+    "  Good: fact \"The user implemented the testing harness for their memory system\"\n"
+    "        -> topic \"Gemory memory system\".\n"
+    "  Use the SAME topic phrase for all facts about the same subject within this\n"
+    "  conversation (be consistent). Prefer a concrete project/entity name if one\n"
+    "  is present (e.g. \"Gemory\", \"Sofia transit tracker\").\n"
+    "  If a fact does not clearly belong to any subject, use an EMPTY topic (\"\").\n"
+    "  Do not force one. The topic must be supported by the conversation; do NOT\n"
+    "  invent a subject not present.\n"
     "\n"
     "Rules for what to extract:\n"
     "- Extract DURABLE facts: things likely to remain true and be useful in future\n"
@@ -48,13 +61,9 @@ _EXTRACTION_PROMPT = (
     '  Bad:  "He wants to build it in Python"\n'
     '  Good: "The user wants to build the memory system in Python"\n'
     "- Write each fact as a complete, present-tense statement.\n"
-    "- Use a consistent way of referring to the user across facts (e.g. always \"The\n"
-    '  user ..."). Do not use their name unless it is itself the fact being stored.\n'
     "- State only what the transcript supports. Do not infer, speculate, or embellish.\n"
-    "  If something is uncertain or hypothetical, either omit it or state the\n"
-    "  uncertainty explicitly as part of the fact.\n"
     "\n"
-    'Output format: ["fact one", "fact two", ...]'
+    'Output format: [{"fact": "fact one", "topic": "topic name"}, ...]'
 )
 
 
@@ -62,22 +71,36 @@ _EXTRACTION_PROMPT = (
 # Parsing helpers
 # ---------------------------------------------------------------------------
 
-def _parse_facts_response(content: str) -> list[str]:
-    """Parse a JSON array of strings from the LLM response *content*.
+def _parse_extraction_response(content: str) -> list[dict[str, str]]:
+    """Parse a JSON array of ``{fact, topic}`` objects from the LLM response.
+
+    Backward-compatible: if the model returns a plain array of strings,
+    each string is wrapped into ``{"fact": s, "topic": ""}``.
 
     Strategy
     --------
     1. Try :func:`json.loads` on the raw content.
-    2. Strip markdown code fences (`` ```json `` / `` ``` ``) and find the
-       outermost ``[…]`` bracket pair, then try ``json.loads`` on that
-       substring.
+    2. Strip markdown code fences and find the outermost ``[…]`` bracket
+       pair, then try ``json.loads`` on that substring.
     3. If all attempts fail, raise :class:`ValueError` with the raw content.
     """
+
+    def _normalize(item):
+        """Convert a single parsed item to {fact, topic} format."""
+        if isinstance(item, str):
+            return {"fact": item, "topic": ""}
+        if isinstance(item, dict):
+            return {
+                "fact": str(item.get("fact", "")),
+                "topic": str(item.get("topic", "")),
+            }
+        return {"fact": str(item), "topic": ""}
+
     # ── Attempt 1: direct JSON parse ──────────────────────────────────
     try:
         data = json.loads(content)
         if isinstance(data, list):
-            return [str(item) for item in data]
+            return [_normalize(item) for item in data]
     except json.JSONDecodeError:
         pass
 
@@ -89,8 +112,6 @@ def _parse_facts_response(content: str) -> list[str]:
             cleaned = cleaned[first_nl + 1 :]
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3].strip()
-        elif cleaned.endswith("```"):
-            cleaned = cleaned[:-3].strip()
 
     start = cleaned.find("[")
     end = cleaned.rfind("]")
@@ -100,7 +121,7 @@ def _parse_facts_response(content: str) -> list[str]:
             try:
                 data = json.loads(candidate)
                 if isinstance(data, list):
-                    return [str(item) for item in data]
+                    return [_normalize(item) for item in data]
             except json.JSONDecodeError:
                 pass
 
@@ -110,7 +131,7 @@ def _parse_facts_response(content: str) -> list[str]:
         content[:500],
     )
     raise ValueError(
-        f"Could not parse LLM response as a JSON array of strings.\n"
+        "Could not parse LLM response as a JSON array of {fact, topic} objects.\n"
         f"Raw response:\n{content}"
     )
 
@@ -119,11 +140,11 @@ def _parse_facts_response(content: str) -> list[str]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def extract_facts(transcript: str) -> list[str]:
+def extract_facts(transcript: str) -> list[dict[str, str]]:
     """Extract atomic, durable facts from a conversation *transcript*.
 
-    Returns a list of fact strings.  Raises :class:`ValueError` if the
-    LLM response cannot be parsed.
+    Returns a list of dicts with keys ``"fact"`` and ``"topic"``.
+    Raises :class:`ValueError` if the LLM response cannot be parsed.
 
     Raises
     ------
@@ -132,7 +153,7 @@ def extract_facts(transcript: str) -> list[str]:
     openai.RateLimitError
         API rate limit exceeded.
     ValueError
-        Response could not be parsed as a JSON array of strings.
+        Response could not be parsed as a JSON array of {fact, topic} objects.
     """
     logger.info("Extracting facts from transcript (%d chars)", len(transcript))
     logger.info(
@@ -180,8 +201,9 @@ def extract_facts(transcript: str) -> list[str]:
             raw if raw else None,
         )
 
-    facts = _parse_facts_response(raw)
-    logger.info("Extracted %d facts", len(facts))
+    facts = _parse_extraction_response(raw)
+    topics_count = sum(1 for f in facts if f.get("topic"))
+    logger.info("Extracted %d facts (%d with topics)", len(facts), topics_count)
     return facts
 
 

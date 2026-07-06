@@ -36,8 +36,10 @@ class TestExtractionQuality:
         facts = llm.extract_facts(transcript)
 
         print(f"\n--- conv_01 extraction ({len(facts)} facts) ---")
-        for i, fact in enumerate(facts, 1):
-            print(f"  {i}. {fact}")
+        for i, item in enumerate(facts, 1):
+            topic = item.get("topic", "")
+            topic_suffix = f" [topic: {topic}]" if topic else ""
+            print(f"  {i}. {item['fact']}{topic_suffix}")
 
         print(f"\nExpected ({len(expected['facts'])} facts):")
         for i, fact in enumerate(expected["facts"], 1):
@@ -55,8 +57,10 @@ class TestExtractionQuality:
         facts = llm.extract_facts(transcript)
 
         print(f"\n--- conv_02 extraction ({len(facts)} facts) ---")
-        for i, fact in enumerate(facts, 1):
-            print(f"  {i}. {fact}")
+        for i, item in enumerate(facts, 1):
+            topic = item.get("topic", "")
+            topic_suffix = f" [topic: {topic}]" if topic else ""
+            print(f"  {i}. {item['fact']}{topic_suffix}")
 
         print(f"\nExpected ({len(expected['facts'])} facts):")
         for i, fact in enumerate(expected["facts"], 1):

@@ -30,8 +30,8 @@ class TestSaveLoadRoundtrip:
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         graph = GraphStore(tmp_graph_path)
-        facts = _load_expected("conv_01.expected.json")
-        store_facts(facts, "src1", None, graph)
+        raw_facts = _load_expected("conv_01.expected.json")
+        store_facts([{"fact": f, "topic": ""} for f in raw_facts], "src1", None, graph)
 
         # Capture in-memory state
         nodes_before = graph.all_nodes()
@@ -64,8 +64,8 @@ class TestMemoryJsonPrettyPrinted:
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         graph = GraphStore(tmp_graph_path)
-        facts = _load_expected("conv_01.expected.json")
-        store_facts(facts, "src1", None, graph)
+        raw_facts = _load_expected("conv_01.expected.json")
+        store_facts([{"fact": f, "topic": ""} for f in raw_facts], "src1", None, graph)
 
         with open(tmp_graph_path) as f:
             content = f.read()

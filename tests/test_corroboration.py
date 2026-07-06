@@ -66,11 +66,17 @@ class TestCrossSourceCorroboration:
         graph = GraphStore(str(tmp_path / "memory.json"))
 
         # ── First source: conv_01 facts ─────────────────────────────────
-        r1 = store_facts([f1, f2], "src1", "conv_01", graph)
+        r1 = store_facts(
+            [{"fact": f, "topic": ""} for f in [f1, f2]],
+            "src1", "conv_01", graph,
+        )
         assert r1["new_nodes"] == 2
 
         # ── Second source: conv_02 facts ────────────────────────────────
-        r2 = store_facts([g1, g2, g3, g4, g5], "src2", "conv_02", graph)
+        r2 = store_facts(
+            [{"fact": f, "topic": ""} for f in [g1, g2, g3, g4, g5]],
+            "src2", "conv_02", graph,
+        )
         assert r2["new_nodes"] == 3        # g3, g4, g5
         assert r2["corroborated"] == 2     # g1->f1, g2->f2
         assert r2["skipped"] == 0
