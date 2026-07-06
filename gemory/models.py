@@ -23,8 +23,9 @@ class Node:
     created_at: str = ""
     updated_at: str = ""
     level: int = 0  # Computed/derived, not hand-set. PoC leaves are all 0.
-    kind: str = "fact"       # "fact" (leaf, extracted) or "abstraction" (dreamer-created)
-    label: str = ""          # Short theme label for abstraction nodes; empty for facts
+    kind: str = "fact"                    # "fact" (leaf, extracted) or "abstraction" (dreamer-created)
+    label: str = ""                       # Short theme label for abstraction nodes; empty for facts
+    abstraction_kind: str = ""            # "" (not an abstraction), "topic" (level-1 topic), "theme" (higher-level)
 
 
 @dataclass

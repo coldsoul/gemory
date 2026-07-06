@@ -119,7 +119,8 @@ class GraphStore:
                     f"embedding in the sidecar ({self._embeddings_path})"
                 )
 
-        # Migrate old schema: nodes created before kind/label were added.
+        # Migrate old schema: nodes created before kind/label/abstraction_kind
+        # were added.
         migrated = 0
         for nid in self._graph.nodes():
             attrs = self._graph.nodes[nid]
@@ -128,9 +129,12 @@ class GraphStore:
                 migrated += 1
             if "label" not in attrs:
                 attrs["label"] = ""
+            if "abstraction_kind" not in attrs:
+                attrs["abstraction_kind"] = ""
+                migrated += 1
         if migrated:
             logger.info(
-                "Migrated %d nodes missing kind/label fields", migrated,
+                "Migrated %d nodes missing schema fields", migrated,
             )
 
         logger.info(
@@ -173,6 +177,7 @@ class GraphStore:
         provenance: dict,
         kind: str = "fact",
         label: str = "",
+        abstraction_kind: str = "",
     ) -> str:
         """Create a new node in the graph.
 
@@ -188,6 +193,9 @@ class GraphStore:
             ``"fact"`` (leaf, extracted) or ``"abstraction"`` (dreamer-created).
         label
             Short theme label for abstraction nodes; empty for facts.
+        abstraction_kind
+            ``""`` (not an abstraction), ``"topic"`` (level-1 topic), or
+            ``"theme"`` (dreamer-created higher-level).
 
         Returns the auto-generated UUID4 node id.
         """
@@ -203,11 +211,12 @@ class GraphStore:
             level=0,
             kind=kind,
             label=label,
+            abstraction_kind=abstraction_kind,
         )
         self._embeddings[node_id] = embedding
         logger.info(
-            "Created node %s (confidence=%.1f, kind=%s)",
-            node_id, config.CONFIDENCE_BASE, kind,
+            "Created node %s (confidence=%.1f, kind=%s, abstraction_kind=%s)",
+            node_id, config.CONFIDENCE_BASE, kind, abstraction_kind,
         )
         return node_id
 
@@ -392,6 +401,22 @@ class GraphStore:
         logger.info(
             "Added parent_of edge %s -> %s", parent_id, child_id,
         )
+
+    def get_topic_nodes(self) -> list[Node]:
+        """Return all nodes whose ``abstraction_kind`` is ``"topic"``."""
+        return [
+            n for n in self.all_nodes()
+            if n.kind == "abstraction" and n.abstraction_kind == "topic"
+        ]
+
+    def get_node_embedding(self, node_id: str) -> list[float]:
+        """Return the embedding vector for a node from the sidecar.
+
+        Raises :class:`KeyError` if the node does not exist.
+        """
+        if node_id not in self._graph:
+            raise KeyError(node_id)
+        return self._embeddings.get(node_id, [])
 
     def all_nodes(self) -> list[Node]:
         """Return every :class:`Node` currently in the graph."""
