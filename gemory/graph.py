@@ -5,6 +5,7 @@ Embeddings live in a separate JSON sidecar file -- never on the node itself.
 """
 
 import logging
+from typing import Any
 
 import json
 import os
@@ -17,7 +18,7 @@ import networkx as nx
 import numpy as np
 
 from gemory import config
-from gemory.models import Node
+from gemory.models import Edge, Node
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +119,20 @@ class GraphStore:
                     f"embedding in the sidecar ({self._embeddings_path})"
                 )
 
+        # Migrate old schema: nodes created before kind/label were added.
+        migrated = 0
+        for nid in self._graph.nodes():
+            attrs = self._graph.nodes[nid]
+            if "kind" not in attrs:
+                attrs["kind"] = "fact"
+                migrated += 1
+            if "label" not in attrs:
+                attrs["label"] = ""
+        if migrated:
+            logger.info(
+                "Migrated %d nodes missing kind/label fields", migrated,
+            )
+
         logger.info(
             "Loaded graph: %d nodes, %d edges",
             self._graph.number_of_nodes(),
@@ -156,8 +171,23 @@ class GraphStore:
         content: str,
         embedding: list[float],
         provenance: dict,
+        kind: str = "fact",
+        label: str = "",
     ) -> str:
         """Create a new node in the graph.
+
+        Parameters
+        ----------
+        content
+            Fact or abstraction text.
+        embedding
+            Vector embedding of *content*.
+        provenance
+            Source metadata dict (must contain ``"source_id"``).
+        kind
+            ``"fact"`` (leaf, extracted) or ``"abstraction"`` (dreamer-created).
+        label
+            Short theme label for abstraction nodes; empty for facts.
 
         Returns the auto-generated UUID4 node id.
         """
@@ -171,10 +201,13 @@ class GraphStore:
             created_at=now,
             updated_at=now,
             level=0,
+            kind=kind,
+            label=label,
         )
         self._embeddings[node_id] = embedding
         logger.info(
-            "Created node %s (confidence=%.1f)", node_id, config.CONFIDENCE_BASE,
+            "Created node %s (confidence=%.1f, kind=%s)",
+            node_id, config.CONFIDENCE_BASE, kind,
         )
         return node_id
 
@@ -302,6 +335,63 @@ class GraphStore:
             node_id, old_conf, attrs["confidence"],
         )
         return True
+
+    # -- Schema-aware helpers ------------------------------------------------
+
+    def get_all_edges(self) -> list[Edge]:
+        """Return every edge in the graph as :class:`Edge` dataclass instances."""
+        return [
+            Edge(
+                source=u,
+                target=v,
+                weight=data.get("weight", 1.0),
+                relation=data.get("relation", "related"),
+            )
+            for u, v, data in self._graph.edges(data=True)
+        ]
+
+    def get_parents(self, node_id: str) -> list[str]:
+        """Return nodes that have a ``parent_of`` edge pointing TO *node_id*
+        (abstraction nodes above this node)."""
+        return [
+            u
+            for u, v, data in self._graph.in_edges(node_id, data=True)
+            if data.get("relation") == "parent_of"
+        ]
+
+    def get_children(self, node_id: str) -> list[str]:
+        """Return nodes that receive a ``parent_of`` edge FROM *node_id*
+        (members of this abstraction)."""
+        return [
+            v
+            for u, v, data in self._graph.out_edges(node_id, data=True)
+            if data.get("relation") == "parent_of"
+        ]
+
+    def set_node_attr(self, node_id: str, attr: str, value: Any) -> None:
+        """Set an arbitrary attribute on a node.
+
+        Raises :class:`KeyError` if the node does not exist.
+        """
+        if node_id not in self._graph:
+            raise KeyError(node_id)
+        self._graph.nodes[node_id][attr] = value
+
+    def add_parent_edge(self, parent_id: str, child_id: str) -> None:
+        """Add a directed ``parent_of`` edge from *parent_id* to *child_id*.
+
+        Raises :class:`ValueError` if either node does not exist.
+        """
+        if parent_id not in self._graph:
+            raise ValueError(f"Parent node {parent_id!r} not found")
+        if child_id not in self._graph:
+            raise ValueError(f"Child node {child_id!r} not found")
+        self._graph.add_edge(
+            parent_id, child_id, weight=1.0, relation="parent_of",
+        )
+        logger.info(
+            "Added parent_of edge %s -> %s", parent_id, child_id,
+        )
 
     def all_nodes(self) -> list[Node]:
         """Return every :class:`Node` currently in the graph."""
