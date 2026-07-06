@@ -13,7 +13,7 @@ from gemory.graph import GraphStore
 # ---------------------------------------------------------------------------
 
 class TestNodeKindAndLabel:
-    """``add_node`` must store *kind* and *label* correctly."""
+    """``add_node`` must store *kind*, *label*, and *abstraction_kind* correctly."""
 
     def test_add_node_with_kind_and_label(self, empty_graph) -> None:
         nid = empty_graph.add_node(
@@ -23,6 +23,18 @@ class TestNodeKindAndLabel:
         node = empty_graph.get_node(nid)
         assert node.kind == "abstraction"
         assert node.label == "test theme"
+        assert node.abstraction_kind == ""
+
+    def test_add_node_with_abstraction_kind(self, empty_graph) -> None:
+        nid = empty_graph.add_node(
+            "topic content", [0.1, 0.2], {"source_id": "s1"},
+            kind="abstraction", label="Gemory",
+            abstraction_kind="topic",
+        )
+        node = empty_graph.get_node(nid)
+        assert node.kind == "abstraction"
+        assert node.abstraction_kind == "topic"
+        assert node.label == "Gemory"
 
     def test_add_node_defaults_kind_and_label(self, empty_graph) -> None:
         nid = empty_graph.add_node(
@@ -31,10 +43,29 @@ class TestNodeKindAndLabel:
         node = empty_graph.get_node(nid)
         assert node.kind == "fact"
         assert node.label == ""
+        assert node.abstraction_kind == ""
 
 
 class TestLoadOldSchemaDefaults:
     """Nodes serialised before kind/label were added should get defaults on load."""
+
+    def test_get_topic_nodes(self, empty_graph) -> None:
+        t1 = empty_graph.add_node(
+            "topic1", [0.1, 0.2], {"source_id": "s1"},
+            kind="abstraction", label="T1", abstraction_kind="topic",
+        )
+        t2 = empty_graph.add_node(
+            "topic2", [0.3, 0.4], {"source_id": "s2"},
+            kind="abstraction", label="T2", abstraction_kind="topic",
+        )
+        # A regular fact node — should not appear
+        empty_graph.add_node("fact", [0.5, 0.6], {"source_id": "s3"})
+
+        topics = empty_graph.get_topic_nodes()
+        assert len(topics) == 2
+        topic_ids = {n.id for n in topics}
+        assert t1 in topic_ids
+        assert t2 in topic_ids
 
     def test_load_old_schema_defaults_kind_label(self, tmp_path) -> None:
         from gemory.config import EMBEDDINGS_PATH
@@ -73,6 +104,7 @@ class TestLoadOldSchemaDefaults:
         node = graph.get_node("old-node-1")
         assert node.kind == "fact"
         assert node.label == ""
+        assert node.abstraction_kind == ""
 
 
 # ---------------------------------------------------------------------------

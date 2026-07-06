@@ -94,3 +94,13 @@ ABSTRACTION_OVERLAP: float = float(os.getenv("ABSTRACTION_OVERLAP", "0.8"))
 # Safety cap on recursion depth — stop if the hierarchy reaches this many
 # levels. Report if hit so a human can decide whether to increase.
 MAX_LEVELS: int = int(os.getenv("MAX_LEVELS", "6"))
+
+
+# ---------------------------------------------------------------------------
+# Topic tagging
+# ---------------------------------------------------------------------------
+
+# Cosine threshold for matching proposed topic strings to existing canonical
+# topic nodes. Set high (0.80-0.85) because topic strings are short and
+# subject-focused — genuine same-topic phrasings score high.
+TOPIC_MATCH_THRESHOLD: float = float(os.getenv("TOPIC_MATCH_THRESHOLD", "0.85"))
