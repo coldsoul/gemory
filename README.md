@@ -91,6 +91,14 @@ In `~/Library/Application Support/Claude/claude_desktop_config.json`:
 Replace `/absolute/path/to/gemory` with the actual path (e.g. `/Users/you/Projects/gemory`).
 Then restart Claude Desktop and `tail -f gemory.log` to watch live extraction logs.
 
+The config file location:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+Note: the `command` path above uses Unix-style absolute paths — adjust for Windows
+(e.g. `C:\Users\you\gemory\.venv\Scripts\python.exe`).
+
 ### Other MCP clients
 
 For clients that support URL-based registration, run the server in HTTP SSE mode:
