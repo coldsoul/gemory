@@ -35,49 +35,79 @@ Required variables in `.env`:
 - `DEEPSEEK_API_KEY` — your DeepSeek API key for fact extraction
 - `EMBEDDING_API_KEY` — your embeddings API key (can be the same key)
 
+Optional variables:
+
+- `GEMORY_LOG_FILE` — write server logs to this file in addition to stderr.
+  Critical when running under an MCP client that hides stderr (e.g. Claude Desktop).
+  Set to an absolute path like `/Users/you/gemory/gemory.log` and `tail -f` it.
+
 See `.env.example` for all configurable options (thresholds, model names, paths).
 
 ## Run
 
-Start the MCP server on stdio:
-
-```bash
-uv run gemory
-```
-
-Or without the console script (works without `uv sync`):
+### Stdio (default)
 
 ```bash
 uv run gemory/server.py
 ```
 
-The server loads `memory.json` and `embeddings.json` from the current directory.
+After running `uv sync --extra dev` the console script `uv run gemory` also works.
+
+The server loads `memory.json` and `embeddings.json` from the project directory.
 If they don't exist, it starts with an empty graph.
+
+### HTTP SSE (experimental)
+
+```bash
+uv run gemory/server.py --http
+```
+
+Starts on `http://127.0.0.1:8765/sse`.
+Use `--host` and `--port` to change.
+Note: Claude Desktop only accepts HTTPS URLs, so this transport is best for other MCP clients or local debugging.
 
 ## MCP client registration
 
-To register Gemory with an MCP client (Claude Desktop, etc.), add this to your
-client's MCP server configuration:
+### Claude Desktop
+
+In `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "gemory": {
-      "command": "uv",
+      "command": "/absolute/path/to/gemory/.venv/bin/python",
       "args": [
-        "run",
-        "gemory"
+        "/absolute/path/to/gemory/gemory/server.py"
       ],
-      "cwd": "/absolute/path/to/gemory"
+      "env": {
+        "GEMORY_LOG_FILE": "/absolute/path/to/gemory/gemory.log"
+      }
     }
   }
 }
 ```
 
-For Claude Desktop, this goes in `claude_desktop_config.json` (location varies by platform):
+Replace `/absolute/path/to/gemory` with the actual path (e.g. `/Users/you/Projects/gemory`).
+Then restart Claude Desktop and `tail -f gemory.log` to watch live extraction logs.
+
+The config file location:
 
 - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+Note: the `command` path above uses Unix-style absolute paths — adjust for Windows
+(e.g. `C:\Users\you\gemory\.venv\Scripts\python.exe`).
+
+### Other MCP clients
+
+For clients that support URL-based registration, run the server in HTTP SSE mode:
+
+```bash
+uv run gemory/server.py --http
+```
+
+Then configure the client URL to `http://127.0.0.1:8765/sse`.
 
 ## Tools
 
@@ -123,6 +153,18 @@ The graph is stored as two JSON files:
 
 Both are gitignored — they contain runtime data and potentially sensitive extracted facts.
 
+## Visualization
+
+Render an interactive HTML graph of the stored facts:
+
+```bash
+uv run python scripts/visualize.py memory.json -o graph.html
+open graph.html
+```
+
+Nodes are colored by confidence, sized by confidence, and show full fact content on hover.
+Edges display relationship type and weight.
+
 ## Development
 
 ### Run tests
@@ -131,21 +173,37 @@ Both are gitignored — they contain runtime data and potentially sensitive extr
 uv run pytest tests/ -v
 ```
 
-Tests use stubbed embeddings and mocked API calls — no network or API keys needed.
+All 41 deterministic tests use stubbed embeddings — no network or API keys needed.
+
+The test harness includes frozen transcript fixtures, controlled vector construction
+via Cholesky decomposition, and a graph snapshot/diff helper for declarative assertions.
+See [TESTING.md](TESTING.md) for the full harness documentation.
+
+Live sanity tests (real API calls, skipped by default):
+
+```bash
+GEMORY_LIVE=1 uv run pytest tests/live/ -v -s
+```
 
 ### Architecture
 
 ```
 gemory/
-├── server.py      # MCP server: remember + recall tools (stdio transport)
-├── graph.py       # GraphStore: in-memory DiGraph + JSON persistence
-├── llm.py         # DeepSeek wrapper: fact extraction + embeddings
-├── extractor.py   # Store algorithm: source_id, dedup, edge creation
-├── recall.py      # Query → embed → similarity search → formatted results
-├── config.py      # Environment-driven constants and thresholds
-├── models.py      # Node and Edge dataclasses
-├── memory.json    # Human-readable graph (runtime, gitignored)
+├── server.py       # MCP server: remember + recall tools (stdio + SSE)
+├── graph.py        # GraphStore: in-memory DiGraph + JSON persistence
+├── llm.py          # DeepSeek wrapper: fact extraction + embeddings
+├── extractor.py    # Store algorithm: source_id, dedup, edge creation
+├── recall.py       # Query → embed → similarity search → formatted results
+├── config.py       # Environment-driven constants and thresholds
+├── models.py       # Node and Edge dataclasses
+├── memory.json     # Human-readable graph (runtime, gitignored)
 └── embeddings.json # Embedding sidecar (runtime, gitignored)
+scripts/
+└── visualize.py    # pyvis interactive graph visualizer
+tests/
+├── fixtures/       # Frozen transcripts + expectation files
+├── live/           # Live sanity suite (GEMORY_LIVE=1, manual only)
+└── *.py            # 41 deterministic unit + integration tests
 ```
 
 Strict isolation rules:
