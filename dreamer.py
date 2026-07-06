@@ -233,6 +233,62 @@ def _consolidate_level(
     return new_abstractions
 
 
+def _consolidate_level_1(
+    graph: GraphStore,
+    run_id: str,
+) -> list[dict]:
+    """Level 1: enrich topic nodes that have enough child facts.
+
+    Rather than clustering by embedding similarity, this uses the topic
+    registry's membership edges to group facts under their canonical topic
+    nodes.  A topic is enriched only when it has at least ``MIN_CLUSTER_SIZE``
+    child facts at level 0.
+    """
+    topic_nodes = graph.get_topic_nodes()
+    logger.info(
+        "--- Consolidation level 1 (%d topic nodes) ---", len(topic_nodes),
+    )
+
+    enriched: list[dict] = []
+    for topic in topic_nodes:
+        children = graph.get_children(topic.id)
+        # Only count fact-level children (level 0).
+        fact_children = [
+            c for c in children
+            if graph.get_node(c).level == 0
+        ]
+
+        if len(fact_children) < MIN_CLUSTER_SIZE:
+            continue
+
+        # Enrich the topic with a summary.
+        child_facts = [graph.get_node(c).content for c in fact_children]
+        try:
+            result = summarize_cluster(child_facts)
+        except Exception:
+            logger.exception("Summarization failed for topic %s", topic.label)
+            continue
+
+        summary = result.get("summary", "")
+        label = result.get("label", topic.label)
+
+        # Update the topic node's content and label
+        if summary:
+            graph.set_node_attr(topic.id, "content", summary)
+        if label and label != topic.label:
+            graph.set_node_attr(topic.id, "label", label)
+
+        enriched.append({
+            "id": topic.id,
+            "member_ids": fact_children,
+        })
+        logger.info(
+            "Enriched topic %s: %d children", topic.label, len(fact_children),
+        )
+
+    return enriched
+
+
 def _print_dry_run_report(
     all_abstractions: list[dict],
     graph: GraphStore,
@@ -318,24 +374,24 @@ def main() -> None:
     if not apply_mode:
         print(f"\n--- DRY RUN (run_id={run_id}) ---")
 
-    # Select working set.
-    working_set = _select_working_set(graph, mode, recent_days)
-
-    # Consolidate recursively.
+    # Level 1: enrich topic nodes (topic membership, not embedding clustering).
     all_abstractions: list[dict] = []
-    current_level = 1
-    next_working_set = working_set
+    level_1_abs = _consolidate_level_1(graph, run_id)
+    all_abstractions.extend(level_1_abs)
 
+    # Level 2+: cluster topic/theme abstractions recursively.
+    working_set = [a["id"] for a in level_1_abs]
+    current_level = 2
     while current_level <= MAX_LEVELS:
         new_abs = _consolidate_level(
-            graph, next_working_set, run_id, all_abstractions, current_level,
+            graph, working_set, run_id, all_abstractions, current_level,
         )
         if not new_abs:
             break
 
         all_abstractions.extend(new_abs)
         # Next level: cluster the newly created abstractions.
-        next_working_set = [a["id"] for a in new_abs]
+        working_set = [a["id"] for a in new_abs]
         current_level += 1
 
     if current_level > MAX_LEVELS:

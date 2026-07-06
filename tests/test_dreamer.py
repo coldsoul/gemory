@@ -325,17 +325,34 @@ class TestDryRunWritesNothing:
 class TestApplyWritesAndBacksUp:
     """Apply mode must modify the graph and create backup files."""
 
-    def test_apply_writes_and_backs_up(self, populated_graph, monkeypatch, tmp_path):
+    def test_apply_writes_and_backs_up(
+        self, populated_graph, monkeypatch, tmp_path,
+    ):
         store, memory_path = populated_graph
+        # Add a topic node with enough children so level-1 enrichment runs.
+        topic = store.add_node(
+            "Test topic", [1.0, 0.0, 0.0], {"source_id": "topics"},
+            kind="abstraction", label="Test topic", abstraction_kind="topic",
+        )
+        store.set_node_attr(topic, "level", 1)
+        # Link the 4 cluster-1 nodes as children
+        all_nodes = store.all_nodes()
+        linked = 0
+        for n in all_nodes:
+            if n.level == 0 and linked < 4:
+                store.add_parent_edge(topic, n.id)
+                linked += 1
         store.save()
 
         import dreamer as dr
 
         stub_embed = LookupStub(
-            {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
+            {"Auto Theme": [1.0, 0.0, 0.0]},
             dim=3,
         )
-        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize(
+            label="Auto Theme", summary="Enriched summary.",
+        ))
         monkeypatch.setattr(dr, "embed", stub_embed.embed)
 
         monkeypatch.setattr(
@@ -354,7 +371,7 @@ class TestApplyWritesAndBacksUp:
         # Graph file should still exist
         assert os.path.exists(memory_path)
 
-        # Load and verify abstraction exists
+        # Load and verify the topic was enriched
         store2 = GraphStore(memory_path)
         store2.load()
         nodes = store2.all_nodes()
@@ -425,3 +442,76 @@ class TestRecursiveConsolidation:
         for ab in level1_abs:
             parents = store.get_parents(ab["id"])
             assert level2_abs[0]["id"] in parents
+
+
+class TestTopicGroupsFarApartFacts:
+    """Facts far apart in embedding but sharing a topic are grouped by topic."""
+
+    def test_topic_groups_far_apart_facts(self, monkeypatch, tmp_path) -> None:
+        import dreamer as dr
+        from gemory.graph import GraphStore
+        from gemory.topics import resolve_topic
+
+        store = GraphStore(str(tmp_path / "memory.json"))
+
+        # Create 6 facts: 3 about "Gemory" (far-apart embeddings), 3 about
+        # "FPV drones" (far-apart embeddings).
+        facts = [
+            ("Gemory fact 1", [1.0, 0.0, 0.0, 0.0]),
+            ("Gemory fact 2", [0.3, 0.9, 0.0, 0.0]),
+            ("Gemory fact 3", [0.0, 0.5, 0.8, 0.0]),
+            ("FPV fact 1",    [0.0, 0.0, 0.0, 1.0]),
+            ("FPV fact 2",    [0.0, 0.0, 0.3, 0.9]),
+            ("FPV fact 3",    [0.3, 0.0, 0.0, 0.5]),
+        ]
+        f_ids = []
+        for content, emb in facts:
+            nid = store.add_node(
+                content, emb, {"source_id": "s"},
+            )
+            f_ids.append(nid)
+
+        # Stub topic embed so resolve_topic can create topic nodes.
+        topic_stub = LookupStub(
+            {"Gemory": [1.0, 0.0, 0.0, 0.0],
+             "FPV drones": [0.0, 1.0, 0.0, 0.0]},
+            dim=4,
+        )
+        monkeypatch.setattr("gemory.topics.embed", topic_stub.embed)
+
+        topic_gemory = resolve_topic(store, "Gemory")
+        topic_fpv = resolve_topic(store, "FPV drones")
+        assert topic_gemory is not None
+        assert topic_fpv is not None
+
+        # Link facts to their topics.
+        for i in range(3):
+            store.add_parent_edge(topic_gemory, f_ids[i])
+        for i in range(3, 6):
+            store.add_parent_edge(topic_fpv, f_ids[i])
+
+        # Stub dreamer's summarize_cluster.
+        call_log: list[list[str]] = []
+
+        def mock_summarize(facts_list):
+            call_log.append(facts_list)
+            return {"label": "Auto Theme", "summary": "Enriched summary."}
+
+        monkeypatch.setattr(dr, "summarize_cluster", mock_summarize)
+        monkeypatch.setattr(dr, "embed", topic_stub.embed)
+
+        # Run level-1 enrichment.
+        enriched = dr._consolidate_level_1(store, "run1")
+
+        assert len(enriched) == 2, (
+            f"Expected 2 enriched topics, got {len(enriched)}"
+        )
+        assert len(call_log) == 2, (
+            f"Expected 2 summarize_cluster calls, got {len(call_log)}"
+        )
+
+        # Verify each topic's content was enriched with a summary.
+        gemory_node = store.get_node(topic_gemory)
+        assert "Enriched" in gemory_node.content
+        fpv_node = store.get_node(topic_fpv)
+        assert "Enriched" in fpv_node.content
