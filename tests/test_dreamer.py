@@ -97,37 +97,6 @@ def small_graph(tmp_path):
     return store, str(tmp_path / "small.json")
 
 
-@pytest.fixture
-def deep_graph(tmp_path):
-    """12 nodes forming 3 clusters of 4 — for recursive consolidation testing."""
-    store = GraphStore(str(tmp_path / "deep.json"))
-
-    n = 12
-    gram = np.full((n, n), 0.30)
-    np.fill_diagonal(gram, 1.0)
-
-    # 3 clusters of 4
-    for cluster_start in range(0, n, 4):
-        for i in range(cluster_start, cluster_start + 4):
-            for j in range(cluster_start, cluster_start + 4):
-                if i != j:
-                    gram[i, j] = 0.88
-
-    gram = (gram + gram.T) / 2
-    np.fill_diagonal(gram, 1.0)
-
-    vecs = vectors_with_cosines(gram)
-    facts = [f"Fact {i} in cluster {i // 4}" for i in range(n)]
-    for i, fact in enumerate(facts):
-        store.add_node(
-            content=fact,
-            embedding=vecs[i].tolist(),
-            provenance={"source_id": f"s{i}", "label": "", "timestamp": ""},
-        )
-    store.save()
-    return store, str(tmp_path / "deep.json")
-
-
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -380,65 +349,66 @@ class TestApplyWritesAndBacksUp:
 
 
 class TestRecursiveConsolidation:
-    """Multiple levels of hierarchy: level 0 -> level 1 -> level 2."""
+    """Multiple levels of hierarchy: topics -> themes."""
 
-    def test_recursive_consolidation(self, deep_graph, monkeypatch):
-        store, _ = deep_graph
-        all_ids = [n.id for n in store.all_nodes()]
-
+    def test_recursive_consolidation(self, monkeypatch, tmp_path):
         import dreamer as dr
+        from gemory.graph import GraphStore
+        import numpy as np
+        from tests.stubs import vectors_with_cosines
 
-        # Summarizer returns different results for each call
-        call_count = [0]
+        store = GraphStore(str(tmp_path / "memory.json"))
 
+        # Create 9 fact nodes.
+        f_ids = []
+        for i in range(9):
+            nid = store.add_node(
+                f"fact {i}", [1.0, 0.0, 0.0], {"source_id": "s"},
+            )
+            f_ids.append(nid)
+
+        # Create 3 topic nodes with embeddings that cluster together at level 2
+        # (mutual cosine 0.88 > CLUSTER_SIM_THRESHOLD).
+        gram = np.array([[1.0, 0.88, 0.88],
+                         [0.88, 1.0, 0.88],
+                         [0.88, 0.88, 1.0]])
+        tvecs = vectors_with_cosines(gram, dim=4)
+        topics = []
+        for i in range(3):
+            tid = store.add_node(
+                f"Topic {i}", tvecs[i].tolist(), {"source_id": "topics"},
+                kind="abstraction", label=f"Topic {i}",
+                abstraction_kind="topic",
+            )
+            store.set_node_attr(tid, "level", 1)
+            # Link 3 facts to each topic
+            for j in range(3):
+                store.add_parent_edge(tid, f_ids[i * 3 + j])
+            topics.append(tid)
+
+        # Stub summarizer and embed.
         def mock_summarize(facts):
-            call_count[0] += 1
-            idx = call_count[0]
-            return {
-                "label": f"Cluster {idx}",
-                "summary": f"Summary of cluster {idx}.",
-            }
+            return {"label": "Auto Theme", "summary": "Enriched summary."}
 
-        # Embed: abstractions for cluster 1, 2, 3 need to cluster at level 2.
-        # Level 1 abstractions get these embeddings:
-        #   "Cluster 1. Summary of cluster 1." -> [1.0, 0.0, 0.0]
-        #   "Cluster 2. Summary of cluster 2." -> [0.9, 0.1, 0.0]
-        #   "Cluster 3. Summary of cluster 3." -> [0.95, 0.05, 0.0]
-        # These have mutual cosine ~0.95+ so they'll cluster at level 2.
-        stub_embed = LookupStub(
-            {
-                "Cluster 1. Summary of cluster 1.": [1.0, 0.0, 0.0],
-                "Cluster 2. Summary of cluster 2.": [0.9, 0.1, 0.0],
-                "Cluster 3. Summary of cluster 3.": [0.95, 0.05, 0.0],
-            },
-            dim=3,
-        )
         monkeypatch.setattr(dr, "summarize_cluster", mock_summarize)
-        monkeypatch.setattr(dr, "embed", stub_embed.embed)
+        monkeypatch.setattr(dr, "embed", lambda x: [1.0, 0.0, 0.0])
 
-        # Level 1: cluster the 12 base nodes -> 3 cluster abstractions
-        level1_abs = dr._consolidate_level(store, all_ids, "run1", [], 1)
+        # Level 1: enrich topics.
+        level1_abs = dr._consolidate_level_1(store, "run1")
         assert len(level1_abs) == 3
 
-        for ab in level1_abs:
-            abs_node = store.get_node(ab["id"])
-            assert abs_node.level == 1
-            assert abs_node.kind == "abstraction"
-
-        # Level 2: cluster the 3 level-1 abstractions -> 1 level-2 abstraction
-        level1_ids = [ab["id"] for ab in level1_abs]
+        # Level 2: cluster topics -> 1 theme.
         level2_abs = dr._consolidate_level(
-            store, level1_ids, "run1", level1_abs, 2,
+            store, [a["id"] for a in level1_abs], "run1", level1_abs, 2,
         )
-
-        # Should produce at least one level-2 abstraction
         assert len(level2_abs) >= 1
 
         level2_node = store.get_node(level2_abs[0]["id"])
         assert level2_node.level == 2
         assert level2_node.kind == "abstraction"
+        assert level2_node.abstraction_kind == "theme"
 
-        # Level-2 abstraction should be parent of the level-1 abstractions
+        # Theme should be parent of the topics.
         for ab in level1_abs:
             parents = store.get_parents(ab["id"])
             assert level2_abs[0]["id"] in parents
@@ -515,3 +485,134 @@ class TestTopicGroupsFarApartFacts:
         assert "Enriched" in gemory_node.content
         fpv_node = store.get_node(topic_fpv)
         assert "Enriched" in fpv_node.content
+
+
+class TestLevel2ThemeGrouping:
+    """Similar topics cluster into themes at level 2."""
+
+    def test_level2_theme_grouping(self, monkeypatch, tmp_path) -> None:
+        import dreamer as dr
+        from gemory.graph import GraphStore
+        import numpy as np
+        from tests.stubs import vectors_with_cosines
+
+        store = GraphStore(str(tmp_path / "memory.json"))
+
+        # Create fact nodes (7 per topic, not all need to be used).
+        f_ids = [store.add_node(f"f{i}", [1.0, 0.0, 0.0], {"source_id": "s"})
+                 for i in range(18)]
+
+        # Create 6 topic nodes: Group A (t0-t2, mutual cosine 0.88),
+        # Group B (t3-t5, mutual cosine 0.88), groups are far apart.
+        gram = np.zeros((6, 6))
+        # Group A: indices 0-2
+        for i in range(3):
+            for j in range(3):
+                gram[i, j] = 0.88 if i != j else 1.0
+        # Group B: indices 3-5
+        for i in range(3, 6):
+            for j in range(3, 6):
+                gram[i, j] = 0.88 if i != j else 1.0
+        # Cross-group: far apart
+        for i in range(3):
+            for j in range(3, 6):
+                gram[i, j] = gram[j, i] = 0.30
+
+        tvecs = vectors_with_cosines(gram, dim=6)
+        topics = []
+        for i in range(6):
+            tid = store.add_node(
+                f"Topic {i}", tvecs[i].tolist(), {"source_id": "topics"},
+                kind="abstraction", label=f"Topic {i}",
+                abstraction_kind="topic",
+            )
+            store.set_node_attr(tid, "level", 1)
+            for j in range(3):
+                store.add_parent_edge(tid, f_ids[i * 3 + j])
+            topics.append(tid)
+
+        def mock_summarize(facts):
+            return {"label": "Auto Theme", "summary": "Theme summary."}
+
+        monkeypatch.setattr(dr, "summarize_cluster", mock_summarize)
+        monkeypatch.setattr(dr, "embed", lambda x: [1.0, 0.0, 0.0])
+
+        # Level 1: enrich topics.
+        level1 = dr._consolidate_level_1(store, "run1")
+        assert len(level1) == 6
+
+        # Level 2: cluster topics -> themes.
+        level2 = dr._consolidate_level(
+            store, [a["id"] for a in level1], "run1", level1, 2,
+        )
+        assert len(level2) == 2, f"Expected 2 themes, got {len(level2)}"
+
+        for theme_info in level2:
+            theme_node = store.get_node(theme_info["id"])
+            assert theme_node.level == 2
+            assert theme_node.kind == "abstraction"
+            assert theme_node.abstraction_kind == "theme"
+
+        # Each theme has parent_of to its constituent topics.
+        for theme_info in level2:
+            children = store.get_children(theme_info["id"])
+            assert len(children) >= 1
+            for cid in children:
+                parent_of = cid in topics
+
+
+class TestIdempotencyPreservesTopics:
+    """Re-running the dreamer does not duplicate topics or themes."""
+
+    def test_idempotency_preserves_topics(self, monkeypatch, tmp_path) -> None:
+        import dreamer as dr
+        from gemory.graph import GraphStore
+        import numpy as np
+        from tests.stubs import vectors_with_cosines
+
+        store = GraphStore(str(tmp_path / "memory.json"))
+
+        # Create 9 fact nodes.
+        f_ids = [store.add_node(f"f{i}", [1.0, 0.0, 0.0], {"source_id": "s"})
+                 for i in range(9)]
+
+        # Create 3 topic nodes with clustering embeddings.
+        gram = np.array([[1.0, 0.88, 0.88],
+                         [0.88, 1.0, 0.88],
+                         [0.88, 0.88, 1.0]])
+        tvecs = vectors_with_cosines(gram, dim=4)
+        for i in range(3):
+            tid = store.add_node(
+                f"Topic {i}", tvecs[i].tolist(), {"source_id": "topics"},
+                kind="abstraction", label=f"Topic {i}",
+                abstraction_kind="topic",
+            )
+            store.set_node_attr(tid, "level", 1)
+            for j in range(3):
+                store.add_parent_edge(tid, f_ids[i * 3 + j])
+
+        def mock_summarize(facts):
+            return {"label": "Auto Theme", "summary": "Theme summary."}
+
+        monkeypatch.setattr(dr, "summarize_cluster", mock_summarize)
+        monkeypatch.setattr(dr, "embed", lambda x: [1.0, 0.0, 0.0])
+
+        # First run.
+        level1 = dr._consolidate_level_1(store, "run1")
+        assert len(level1) == 3
+        level2 = dr._consolidate_level(
+            store, [a["id"] for a in level1], "run1", level1, 2,
+        )
+        assert len(level2) == 1
+        n_after_first = len(store.all_nodes())
+
+        # Second run — should not create new nodes.
+        level1_2 = dr._consolidate_level_1(store, "run2")
+        assert len(level1_2) == 3  # same 3 topics
+        level2_2 = dr._consolidate_level(
+            store, [a["id"] for a in level1_2], "run2", level1_2, 2,
+        )
+        # Already-parented topics are skipped at level 2, so no new themes.
+        assert len(level2_2) == 0
+        n_after_second = len(store.all_nodes())
+        assert n_after_second == n_after_first

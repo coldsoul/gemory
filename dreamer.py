@@ -122,10 +122,24 @@ def _create_abstraction(
     cluster: set[str],
     run_id: str,
     existing_abstractions: list[dict],
+    consolidation_level: int = 1,
 ) -> str | None:
     """Create an abstraction node for a cluster, or update an existing one.
 
-    Checks existing abstractions via Jaccard overlap before creating.
+    Parameters
+    ----------
+    graph
+        The graph store.
+    cluster
+        Set of member node IDs.
+    run_id
+        Identifier for this dreamer run.
+    existing_abstractions
+        Previously created abstractions (for overlap checking).
+    consolidation_level
+        The recursion level in the dreamer (1=topics, 2+=themes).
+        Used to set ``abstraction_kind`` on the created node.
+
     Returns the abstraction node ID, or ``None`` if no creation was needed.
     """
     member_ids = list(cluster)
@@ -173,6 +187,7 @@ def _create_abstraction(
     abs_level = max_child_level + 1
 
     # Create the abstraction node.
+    abstraction_kind_val = "theme" if consolidation_level >= 2 else ""
     abs_id = graph.add_node(
         content=summary,
         embedding=embedding,
@@ -184,6 +199,7 @@ def _create_abstraction(
         },
         kind="abstraction",
         label=label,
+        abstraction_kind=abstraction_kind_val,
     )
 
     # Set level.
@@ -206,23 +222,44 @@ def _consolidate_level(
     node_ids: list[str],
     run_id: str,
     existing_abstractions: list[dict],
-    _level: int,
+    level: int,
 ) -> list[dict]:
     """Run one level of consolidation: cluster -> abstract.
 
+    At level 2+ nodes that already have a parent (are already under a
+    theme) are excluded to avoid re-clustering.
+
     Returns a list of new abstraction dicts ``{id, member_ids}``.
     """
-    logger.info("--- Consolidation level %d (%d nodes) ---", _level, len(node_ids))
+    # For level 2+, skip nodes that already have a parent.
+    if level >= 2:
+        unparented = [nid for nid in node_ids if not graph.get_parents(nid)]
+        if len(unparented) < len(node_ids):
+            logger.info(
+                "Skipping %d already-parented nodes at level %d",
+                len(node_ids) - len(unparented), level,
+            )
+        node_ids = unparented
+
+    if len(node_ids) < MIN_CLUSTER_SIZE:
+        logger.info(
+            "Too few unparented nodes (%d < %d) at level %d, stopping",
+            len(node_ids), MIN_CLUSTER_SIZE, level,
+        )
+        return []
+
+    logger.info("--- Consolidation level %d (%d nodes) ---", level, len(node_ids))
 
     clusters = cluster_nodes(graph, node_ids)
     if not clusters:
-        logger.info("No qualifying clusters at level %d, stopping", _level)
+        logger.info("No qualifying clusters at level %d, stopping", level)
         return []
 
     new_abstractions: list[dict] = []
     for cluster in clusters:
         abs_id = _create_abstraction(
             graph, cluster, run_id, existing_abstractions,
+            consolidation_level=level,
         )
         if abs_id:
             new_abstractions.append({
