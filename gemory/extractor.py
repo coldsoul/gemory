@@ -208,6 +208,7 @@ def store_facts(
         else:
             new_id = graph.add_node(
                 content=fact, embedding=embedding, provenance=provenance,
+                kind="fact", label="",
             )
             counts["new_nodes"] += 1
             logger.info("New node: %s", new_id)
