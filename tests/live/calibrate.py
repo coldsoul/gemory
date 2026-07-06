@@ -3,9 +3,13 @@
 memory.json to find the valley between true-duplicate and distinct-but-related
 pairs.  Used to choose DEDUP_THRESHOLD and EDGE_THRESHOLD from real data.
 
+With --topics-only, only analyzes topic nodes — useful for tuning
+TOPIC_MATCH_THRESHOLD where topic strings embed tightly.
+
 Skipped unless GEMORY_LIVE=1 is set.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -19,8 +23,17 @@ def main():
         print("Set GEMORY_LIVE=1 to run the calibration script.", file=sys.stderr)
         sys.exit(0)
 
-    memory_path = sys.argv[1] if len(sys.argv) > 1 else "memory.json"
-    embeddings_path = sys.argv[2] if len(sys.argv) > 2 else "embeddings.json"
+    parser = argparse.ArgumentParser(description="Calibrate similarity thresholds")
+    parser.add_argument("memory_path", nargs="?", default="memory.json",
+                        help="Path to memory.json")
+    parser.add_argument("embeddings_path", nargs="?", default="embeddings.json",
+                        help="Path to embeddings.json")
+    parser.add_argument("--topics-only", action="store_true",
+                        help="Only analyze topic nodes (for tuning TOPIC_MATCH_THRESHOLD)")
+    args = parser.parse_args()
+
+    memory_path = args.memory_path
+    embeddings_path = args.embeddings_path
 
     with open(memory_path) as f:
         graph_data = json.load(f)
@@ -32,6 +45,17 @@ def main():
 
     with open(embeddings_path) as f:
         embeddings = json.load(f)
+
+    # Filter to topic nodes if requested
+    if args.topics_only:
+        nodes = [
+            n for n in nodes
+            if n.get("kind") == "abstraction" and n.get("abstraction_kind") == "topic"
+        ]
+        if not nodes:
+            print("No topic nodes found — run the server with a topic-aware extractor first.", file=sys.stderr)
+            sys.exit(0)
+        print(f"Analyzing {len(nodes)} topic nodes (for TOPIC_MATCH_THRESHOLD tuning)")
 
     # Build content + vector lists
     node_contents = []
