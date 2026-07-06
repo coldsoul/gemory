@@ -10,7 +10,7 @@ from typing import Any
 
 @dataclass
 class Node:
-    """Represents one atomic fact in the memory graph.
+    """Represents one node in the memory graph.
 
     Embeddings are NOT stored on the node — they live in a sidecar
     file (embeddings.json) keyed by node id.
@@ -23,14 +23,18 @@ class Node:
     created_at: str = ""
     updated_at: str = ""
     level: int = 0  # Computed/derived, not hand-set. PoC leaves are all 0.
+    kind: str = "fact"       # "fact" (leaf, extracted) or "abstraction" (dreamer-created)
+    label: str = ""          # Short theme label for abstraction nodes; empty for facts
 
 
 @dataclass
 class Edge:
     """A directed relationship between two nodes.
 
-    PoC uses exactly "related" as the relation value.
-    Other values (parent_of, child_of, contradicts) are reserved for later.
+    Relation values:
+    - "related": symmetric association (store-time edge creation)
+    - "parent_of": hierarchy edge (abstraction -> member)
+    Other values (child_of, contradicts) are reserved for later.
     """
 
     source: str
