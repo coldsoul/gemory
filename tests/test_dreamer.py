@@ -1,0 +1,427 @@
+"""Tests for the Gemory dreamer consolidation process.
+
+All LLM calls are stubbed — no real API requests are made.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from gemory import config
+from gemory.cluster import cluster_nodes
+from gemory.graph import GraphStore
+from tests.stubs import LookupStub, vectors_with_cosines
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _stub_summarize(label: str = "Test Theme", summary: str = "A test summary."):
+    """Return a factory that produces a fixed summarization result."""
+    return lambda facts: {"label": label, "summary": summary}
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def populated_graph(tmp_path):
+    """Build a graph with 8 nodes — one clear cluster of 4, one of 3, one lone.
+
+    * Cluster 1: 4 nodes with mutual cosine ~0.88
+    * Cluster 2: 3 nodes with mutual cosine ~0.88
+    * Lone: 1 node far from everyone (cosine ~0.30)
+    """
+    memory_path = str(tmp_path / "memory.json")
+    store = GraphStore(memory_path)
+
+    n = 8
+    gram = np.full((n, n), 0.30)
+    np.fill_diagonal(gram, 1.0)
+
+    # Cluster 1 (indices 0-3)
+    for i in range(4):
+        for j in range(4):
+            if i != j:
+                gram[i, j] = 0.88
+    # Cluster 2 (indices 4-6)
+    for i in range(4, 7):
+        for j in range(4, 7):
+            if i != j:
+                gram[i, j] = 0.88
+
+    gram = (gram + gram.T) / 2
+    np.fill_diagonal(gram, 1.0)
+
+    vecs = vectors_with_cosines(gram)
+    facts = [
+        "The user uses uv for package management.",
+        "The user prefers Python for backend work.",
+        "The user works with networkx for graph processing.",
+        "The user develops on a VPS.",
+        "The user flies FPV drones on weekends.",
+        "The user builds custom drone frames.",
+        "The user uses Betaflight firmware.",
+        "The user drinks oat milk lattes.",
+    ]
+
+    for i, fact in enumerate(facts):
+        store.add_node(
+            content=fact,
+            embedding=vecs[i].tolist(),
+            provenance={"source_id": f"test_{i}", "label": "", "timestamp": ""},
+        )
+
+    store.save()
+    return store, memory_path
+
+
+@pytest.fixture
+def small_graph(tmp_path):
+    """Graph where each cluster would have only 2 nodes (< MIN_CLUSTER_SIZE)."""
+    store = GraphStore(str(tmp_path / "small.json"))
+    gram = np.full((4, 4), 0.30)
+    np.fill_diagonal(gram, 1.0)
+    # Two pairs, each at 0.88 — but clusters of 2 are below threshold
+    gram[0, 1] = gram[1, 0] = 0.88
+    gram[2, 3] = gram[3, 2] = 0.88
+
+    vecs = vectors_with_cosines(gram)
+    for i, fact in enumerate(["A1", "A2", "B1", "B2"]):
+        store.add_node(fact, vecs[i].tolist(), {"source_id": f"s{i}"})
+    return store, str(tmp_path / "small.json")
+
+
+@pytest.fixture
+def deep_graph(tmp_path):
+    """12 nodes forming 3 clusters of 4 — for recursive consolidation testing."""
+    store = GraphStore(str(tmp_path / "deep.json"))
+
+    n = 12
+    gram = np.full((n, n), 0.30)
+    np.fill_diagonal(gram, 1.0)
+
+    # 3 clusters of 4
+    for cluster_start in range(0, n, 4):
+        for i in range(cluster_start, cluster_start + 4):
+            for j in range(cluster_start, cluster_start + 4):
+                if i != j:
+                    gram[i, j] = 0.88
+
+    gram = (gram + gram.T) / 2
+    np.fill_diagonal(gram, 1.0)
+
+    vecs = vectors_with_cosines(gram)
+    facts = [f"Fact {i} in cluster {i // 4}" for i in range(n)]
+    for i, fact in enumerate(facts):
+        store.add_node(
+            content=fact,
+            embedding=vecs[i].tolist(),
+            provenance={"source_id": f"s{i}", "label": "", "timestamp": ""},
+        )
+    store.save()
+    return store, str(tmp_path / "deep.json")
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+class TestBasicAbstraction:
+    """One obvious cluster -> exactly one abstraction node."""
+
+    def test_basic_abstraction(self, populated_graph, monkeypatch):
+        store, memory_path = populated_graph
+        all_ids = [n.id for n in store.all_nodes()]
+
+        import dreamer as dr
+
+        # Stub LLM calls
+        stub_embed = LookupStub(
+            {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
+            dim=3,
+        )
+        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr(dr, "embed", stub_embed.embed)
+
+        # Run consolidation
+        abstractions = dr._consolidate_level(
+            store, all_ids, "test-run", [], 1,
+        )
+
+        # The fixture has 2 clusters (4 nodes + 3 nodes), both above threshold
+        assert len(abstractions) == 2
+
+        for ab in abstractions:
+            abs_id = ab["id"]
+            abs_node = store.get_node(abs_id)
+
+            assert abs_node.kind == "abstraction"
+            assert abs_node.label == "Test Theme"
+            assert abs_node.level == 1
+
+            # parent_of edges to member facts
+            children = store.get_children(abs_id)
+            member_ids = ab["member_ids"]
+            assert len(children) == len(member_ids)
+            assert len(member_ids) >= 3  # each cluster >= MIN_CLUSTER_SIZE
+
+            # Embedding should be stored
+            assert abs_id in store._embeddings
+
+
+class TestMinSizeRespected:
+    """Clusters below MIN_CLUSTER_SIZE produce no abstractions."""
+
+    def test_min_size_respected(self, small_graph, monkeypatch):
+        store, _ = small_graph
+        all_ids = [n.id for n in store.all_nodes()]
+
+        import dreamer as dr
+
+        stub = LookupStub({}, dim=3)
+        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr(dr, "embed", stub.embed)
+
+        abstractions = dr._consolidate_level(store, all_ids, "test-run", [], 1)
+        assert abstractions == []
+
+
+class TestConsolidationIdempotency:
+    """Running consolidation twice should produce no new changes."""
+
+    def test_consolidation_idempotency(self, populated_graph, monkeypatch):
+        store, _ = populated_graph
+        all_ids = [n.id for n in store.all_nodes()]
+
+        import dreamer as dr
+
+        stub_embed = LookupStub(
+            {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
+            dim=3,
+        )
+        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr(dr, "embed", stub_embed.embed)
+
+        # First run
+        r1 = dr._consolidate_level(store, all_ids, "run1", [], 1)
+        assert len(r1) == 2  # 2 clusters in fixture
+
+        n_before = len(store.all_nodes())
+
+        # Second run — existing abstractions list now contains r1
+        r2 = dr._consolidate_level(store, all_ids, "run2", r1, 1)
+        # The overlap check should skip the existing abstraction
+        assert len(r2) == 2  # returns the existing abstraction ids
+        n_after = len(store.all_nodes())
+
+        # No new nodes were added on second run
+        assert n_after == n_before
+
+
+class TestAbstractionProvenance:
+    """Abstraction nodes have correct provenance metadata."""
+
+    def test_abstraction_provenance(self, populated_graph, monkeypatch):
+        store, _ = populated_graph
+        all_ids = [n.id for n in store.all_nodes()]
+
+        import dreamer as dr
+
+        stub_embed = LookupStub(
+            {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
+            dim=3,
+        )
+        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr(dr, "embed", stub_embed.embed)
+
+        abstractions = dr._consolidate_level(store, all_ids, "run-abc", [], 1)
+        assert len(abstractions) >= 1
+
+        # Check each abstraction's provenance
+        for ab in abstractions:
+            abs_node = store.get_node(ab["id"])
+            assert len(abs_node.provenance) == 1
+            prov = abs_node.provenance[0]
+            assert prov["source_id"].startswith("dreamer:")
+            assert "run-abc" in prov["source_id"]
+            assert "member_ids" in prov
+            assert len(prov["member_ids"]) >= 3
+            assert abs_node.kind == "abstraction"
+
+
+class TestAbstractionLevel:
+    """Abstraction level is one above the highest child level."""
+
+    def test_abstraction_level_correct(self, populated_graph, monkeypatch):
+        store, _ = populated_graph
+        all_ids = [n.id for n in store.all_nodes()]
+
+        import dreamer as dr
+
+        stub_embed = LookupStub(
+            {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
+            dim=3,
+        )
+        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr(dr, "embed", stub_embed.embed)
+
+        abstractions = dr._consolidate_level(store, all_ids, "run1", [], 1)
+        assert len(abstractions) >= 1
+
+        for ab in abstractions:
+            abs_node = store.get_node(ab["id"])
+            # All children are at level 0, so abstraction is at level 1
+            assert abs_node.level == 1
+
+            # Individual children are at level 0
+            for mid in ab["member_ids"]:
+                child = store.get_node(mid)
+                assert child.level == 0
+
+
+class TestDryRunWritesNothing:
+    """Dry-run mode must NOT modify the graph file on disk."""
+
+    def test_dry_run_writes_nothing(self, populated_graph, monkeypatch):
+        store, memory_path = populated_graph
+        store.save()  # ensure file is written
+
+        import dreamer as dr
+
+        # Read before
+        with open(memory_path) as f:
+            before = f.read()
+
+        # Stub LLM
+        stub_embed = LookupStub(
+            {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
+            dim=3,
+        )
+        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr(dr, "embed", stub_embed.embed)
+
+        # Also stub sys.argv for main()
+        monkeypatch.setattr(
+            sys, "argv",
+            ["dreamer.py", "--memory-path", memory_path],
+        )
+        monkeypatch.setattr(dr, "sys", sys)  # ensure dreamer uses patched sys.argv
+
+        dr.main()
+
+        # Read after
+        with open(memory_path) as f:
+            after = f.read()
+
+        assert before == after
+
+
+class TestApplyWritesAndBacksUp:
+    """Apply mode must modify the graph and create backup files."""
+
+    def test_apply_writes_and_backs_up(self, populated_graph, monkeypatch, tmp_path):
+        store, memory_path = populated_graph
+        store.save()
+
+        import dreamer as dr
+
+        stub_embed = LookupStub(
+            {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
+            dim=3,
+        )
+        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr(dr, "embed", stub_embed.embed)
+
+        monkeypatch.setattr(
+            sys, "argv",
+            ["dreamer.py", "--apply", "--memory-path", memory_path],
+        )
+        monkeypatch.setattr(dr, "sys", sys)
+
+        dr.main()
+
+        # Check backup files exist
+        dir_entries = os.listdir(tmp_path)
+        bak_files = [f for f in dir_entries if f.endswith(".bak")]
+        assert len(bak_files) >= 1
+
+        # Graph file should still exist
+        assert os.path.exists(memory_path)
+
+        # Load and verify abstraction exists
+        store2 = GraphStore(memory_path)
+        store2.load()
+        nodes = store2.all_nodes()
+        abs_nodes = [n for n in nodes if n.kind == "abstraction"]
+        assert len(abs_nodes) >= 1
+
+
+class TestRecursiveConsolidation:
+    """Multiple levels of hierarchy: level 0 -> level 1 -> level 2."""
+
+    def test_recursive_consolidation(self, deep_graph, monkeypatch):
+        store, _ = deep_graph
+        all_ids = [n.id for n in store.all_nodes()]
+
+        import dreamer as dr
+
+        # Summarizer returns different results for each call
+        call_count = [0]
+
+        def mock_summarize(facts):
+            call_count[0] += 1
+            idx = call_count[0]
+            return {
+                "label": f"Cluster {idx}",
+                "summary": f"Summary of cluster {idx}.",
+            }
+
+        # Embed: abstractions for cluster 1, 2, 3 need to cluster at level 2.
+        # Level 1 abstractions get these embeddings:
+        #   "Cluster 1. Summary of cluster 1." -> [1.0, 0.0, 0.0]
+        #   "Cluster 2. Summary of cluster 2." -> [0.9, 0.1, 0.0]
+        #   "Cluster 3. Summary of cluster 3." -> [0.95, 0.05, 0.0]
+        # These have mutual cosine ~0.95+ so they'll cluster at level 2.
+        stub_embed = LookupStub(
+            {
+                "Cluster 1. Summary of cluster 1.": [1.0, 0.0, 0.0],
+                "Cluster 2. Summary of cluster 2.": [0.9, 0.1, 0.0],
+                "Cluster 3. Summary of cluster 3.": [0.95, 0.05, 0.0],
+            },
+            dim=3,
+        )
+        monkeypatch.setattr(dr, "summarize_cluster", mock_summarize)
+        monkeypatch.setattr(dr, "embed", stub_embed.embed)
+
+        # Level 1: cluster the 12 base nodes -> 3 cluster abstractions
+        level1_abs = dr._consolidate_level(store, all_ids, "run1", [], 1)
+        assert len(level1_abs) == 3
+
+        for ab in level1_abs:
+            abs_node = store.get_node(ab["id"])
+            assert abs_node.level == 1
+            assert abs_node.kind == "abstraction"
+
+        # Level 2: cluster the 3 level-1 abstractions -> 1 level-2 abstraction
+        level1_ids = [ab["id"] for ab in level1_abs]
+        level2_abs = dr._consolidate_level(
+            store, level1_ids, "run1", level1_abs, 2,
+        )
+
+        # Should produce at least one level-2 abstraction
+        assert len(level2_abs) >= 1
+
+        level2_node = store.get_node(level2_abs[0]["id"])
+        assert level2_node.level == 2
+        assert level2_node.kind == "abstraction"
+
+        # Level-2 abstraction should be parent of the level-1 abstractions
+        for ab in level1_abs:
+            parents = store.get_parents(ab["id"])
+            assert level2_abs[0]["id"] in parents
