@@ -67,3 +67,30 @@ CONFIDENCE_BASE: float = float(os.getenv("CONFIDENCE_BASE", "1.0"))
 # Confidence added on each new-source corroboration (a previously unseen
 # source_id confirming the same fact).
 CONFIDENCE_INCREMENT: float = float(os.getenv("CONFIDENCE_INCREMENT", "1.0"))
+
+
+# ---------------------------------------------------------------------------
+# Dreamer (offline consolidation)
+# ---------------------------------------------------------------------------
+
+# Minimum cosine similarity for two nodes to be connected in the cluster graph.
+# Start around EDGE_THRESHOLD neighbourhood (~0.75); tune on real data.
+CLUSTER_SIM_THRESHOLD: float = float(os.getenv("CLUSTER_SIM_THRESHOLD", "0.75"))
+
+# Smallest cluster worth creating an abstraction for.
+# Abstracting over one or two facts produces noise, not insight.
+MIN_CLUSTER_SIZE: int = int(os.getenv("MIN_CLUSTER_SIZE", "3"))
+
+# Largest cluster before forcing a split at a higher similarity threshold.
+# An over-large cluster produces a uselessly-broad abstraction.
+MAX_CLUSTER_SIZE: int = int(os.getenv("MAX_CLUSTER_SIZE", "12"))
+
+# Jaccard overlap threshold for "same abstraction already exists".
+# If a proposed abstraction covers >= this fraction of an existing
+# abstraction's members, update the existing one rather than creating
+# a parallel duplicate.
+ABSTRACTION_OVERLAP: float = float(os.getenv("ABSTRACTION_OVERLAP", "0.8"))
+
+# Safety cap on recursion depth — stop if the hierarchy reaches this many
+# levels. Report if hit so a human can decide whether to increase.
+MAX_LEVELS: int = int(os.getenv("MAX_LEVELS", "6"))
