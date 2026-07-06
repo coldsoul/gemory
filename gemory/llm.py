@@ -224,3 +224,128 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
     # Sort by index to ensure input-order fidelity.
     sorted_data = sorted(response.data, key=lambda x: x.index)
     return [d.embedding for d in sorted_data]
+
+
+# ---------------------------------------------------------------------------
+# Cluster summarization
+# ---------------------------------------------------------------------------
+
+def summarize_cluster(member_facts: list[str]) -> dict[str, str]:
+    """Ask the LLM to produce a label and summary for a cluster of facts.
+
+    Returns a dict with keys ``"label"`` and ``"summary"``.
+
+    Raises :class:`ValueError` if the LLM response cannot be parsed.
+    """
+    logger.info("Summarizing cluster of %d facts", len(member_facts))
+
+    facts_text = "\n".join(f"- {f}" for f in member_facts)
+
+    prompt = (
+        "You are a knowledge consolidator for a long-term memory system. "
+        "You are given a set of related facts about a user. "
+        "Your job is to identify the common theme and write a concise summary.\n"
+        "\n"
+        "Output ONLY a JSON object with exactly two keys: \"label\" and \"summary\". "
+        "No prose, no explanation, no markdown code fences.\n"
+        "\n"
+        "Rules:\n"
+        "- \"label\": a SHORT theme label (3-6 words), something you would scan in a list.\n"
+        "- \"summary\": a 1-2 sentence description of what these facts have in common, "
+        "written to be read months later with no other context. Self-contained, no "
+        "dangling pronouns.\n"
+        "- Do NOT invent facts not supported by the member facts. The abstraction "
+        "describes the cluster; it does not add new claims.\n"
+        "- If the facts do not share a clear common theme, use a label like "
+        "\"Miscellaneous facts\" and state honestly in the summary that no strong "
+        "theme emerged.\n"
+        "\n"
+        "Format: {\"label\": \"theme label\", \"summary\": \"1-2 sentence summary\"}"
+    )
+
+    client = openai.OpenAI(
+        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.DEEPSEEK_API_KEY,
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=config.DEEPSEEK_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": facts_text},
+            ],
+        )
+    except Exception:
+        logger.exception("Cluster summarization failed")
+        raise
+
+    raw = response.choices[0].message.content
+    usage = response.usage
+    finish_reason = response.choices[0].finish_reason
+    if usage:
+        logger.info(
+            "Summarization response: tokens(prompt=%d, completion=%d, total=%d) "
+            "finish=%s raw=%r",
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.total_tokens,
+            finish_reason,
+            raw if raw else None,
+        )
+    else:
+        logger.info(
+            "Summarization response: finish=%s raw=%r",
+            finish_reason,
+            raw if raw else None,
+        )
+
+    parsed = _parse_summarize_response(raw)
+    logger.info(
+        "Summarized cluster: label=%r, summary=%r",
+        parsed.get("label"),
+        parsed.get("summary", "")[:80],
+    )
+    return parsed
+
+
+def _parse_summarize_response(content: str) -> dict[str, str]:
+    """Parse the LLM response into a ``{label, summary}`` dict."""
+    import json
+
+    # Attempt 1: direct JSON parse
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict) and "label" in data and "summary" in data:
+            return {"label": str(data["label"]), "summary": str(data["summary"])}
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 2: strip fences, locate outermost { ... }
+    cleaned = content.strip()
+    if cleaned.startswith("```"):
+        first_nl = cleaned.find("\n")
+        if first_nl != -1:
+            cleaned = cleaned[first_nl + 1:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = cleaned[start:end + 1]
+        if candidate != content:
+            try:
+                data = json.loads(candidate)
+                if isinstance(data, dict) and "label" in data and "summary" in data:
+                    return {"label": str(data["label"]), "summary": str(data["summary"])}
+            except json.JSONDecodeError:
+                pass
+
+    logger.error(
+        "Could not parse summarization response. Raw: %s", content[:500],
+    )
+    raise ValueError(
+        f"Could not parse LLM response as a JSON object with label+summary.\n"
+        f"Raw response:\n{content}"
+    )
