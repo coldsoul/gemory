@@ -97,5 +97,6 @@ class TestEmptyExtraction:
             "new_nodes": 0,
             "corroborated": 0,
             "skipped": 0,
+            "topics_linked": 0,
         }
         assert len(empty_graph.all_nodes()) == 0

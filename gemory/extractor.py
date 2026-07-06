@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from gemory import config
 from gemory import llm
 from gemory.graph import GraphStore
+from gemory.topics import resolve_topic
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +188,7 @@ def store_facts(
         "new_nodes": 0,
         "corroborated": 0,
         "skipped": 0,
+        "topics_linked": 0,
     }
 
     for fact_item in facts:
@@ -207,8 +209,10 @@ def store_facts(
             embedding, threshold=config.DEDUP_THRESHOLD, top_k=1
         )
 
+        node_id: str | None = None
+
         if matches:
-            node_id, _similarity = matches[0]
+            node_id = matches[0][0]
             if graph.bump_confidence(node_id, provenance):
                 counts["corroborated"] += 1
                 logger.info("Corroborated: %s", node_id)
@@ -216,12 +220,12 @@ def store_facts(
                 counts["skipped"] += 1
                 logger.info("Skipped: %s", node_id)
         else:
-            new_id = graph.add_node(
+            node_id = graph.add_node(
                 content=fact_text, embedding=embedding, provenance=provenance,
                 kind="fact", label="",
             )
             counts["new_nodes"] += 1
-            logger.info("New node: %s", new_id)
+            logger.info("New node: %s", node_id)
 
             # Connect to close-but-distinct neighbours.
             candidates = graph.find_similar(
@@ -230,15 +234,29 @@ def store_facts(
             for cand_id, cand_sim in candidates:
                 if cand_sim < config.DEDUP_THRESHOLD:
                     graph.add_edge(
-                        new_id, cand_id, weight=cand_sim, relation="related",
+                        node_id, cand_id, weight=cand_sim, relation="related",
+                    )
+
+        # Topic linking (for both new and corroborated facts)
+        if topic_text and topic_text.strip():
+            topic_id = resolve_topic(graph, topic_text.strip())
+            if topic_id:
+                parents = graph.get_parents(node_id)
+                if topic_id not in parents:
+                    graph.add_parent_edge(topic_id, node_id)
+                    counts["topics_linked"] += 1
+                    logger.info(
+                        "Linked fact %s to topic %s",
+                        node_id[:8], topic_id[:8],
                     )
 
     graph.save()
     logger.info(
-        "Saved graph (%d new, %d corroborated, %d skipped)",
+        "Saved graph (%d new, %d corroborated, %d skipped, %d topics linked)",
         counts["new_nodes"],
         counts["corroborated"],
         counts["skipped"],
+        counts["topics_linked"],
     )
 
     return counts
