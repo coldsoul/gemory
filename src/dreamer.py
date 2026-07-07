@@ -6,6 +6,13 @@ them, and builds emergent hierarchy through recursive consolidation.
 
 Run with --dry-run (default) to preview changes without applying.
 Run with --apply to write changes (creates a backup first).
+
+Clustering methods
+------------------
+* ``algorithm`` -- cosine-based Louvain community detection.
+* ``llm`` -- LLM-based thematic grouping of labels+summaries.
+* ``hybrid`` (apply default) -- algorithm first, then LLM on leftovers.
+* ``diff`` (dry-run default) -- run both and compare results.
 """
 
 import argparse
@@ -13,6 +20,8 @@ import logging
 import os
 import shutil
 import sys
+import tempfile
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
 # Ensure project root on sys.path so ``from src.*`` imports resolve
@@ -133,7 +142,6 @@ def _create_abstraction(
     """
     member_ids = list(cluster)
     member_nodes = [graph.get_node(mid) for mid in member_ids]
-    member_facts = [n.content for n in member_nodes]
 
     # Check for existing overlapping abstraction.
     for existing in existing_abstractions:
@@ -248,6 +256,142 @@ def _consolidate_layer(
     return new_abstractions
 
 
+def _run_consolidation_pass(
+    graph: GraphStore,
+    run_id: str,
+    method: str,
+) -> list[dict]:
+    """Run one full consolidation pass with the given method.
+
+    Returns a list of ``{id, member_ids}`` dicts for each abstraction
+    created.  Does **not** save to disk.
+    """
+    all_node_ids = [n.id for n in graph.all_nodes()]
+    layer = all_node_ids
+    all_abstractions: list[dict] = []
+
+    while True:
+        new_abs = _consolidate_layer(
+            graph, layer, run_id, all_abstractions, method=method,
+        )
+        if not new_abs:
+            break
+        all_abstractions.extend(new_abs)
+        layer = [a["id"] for a in new_abs]
+
+        max_level = max(
+            (graph.get_node(a["id"]).level for a in all_abstractions),
+            default=0,
+        )
+        if max_level >= MAX_LEVELS:
+            break
+
+    return all_abstractions
+
+
+# ---------------------------------------------------------------------------
+# Diff dry-run
+# ---------------------------------------------------------------------------
+
+def _diff_consolidation(graph: GraphStore, run_id: str) -> dict:
+    """Run both algorithm and LLM clustering, then diff the results.
+
+    Returns a dict with keys ``"agreement"``, ``"algorithm_only"``,
+    ``"llm_only"``.
+    """
+    tmpdir = tempfile.mkdtemp(prefix="gemory-diff-")
+    orig_mem = os.path.join(tmpdir, "memory.json")
+    orig_emb = os.path.join(tmpdir, "embeddings.json")
+
+    # Save current state and copy to temp.
+    graph.save()
+    mem_path = graph._path
+    emb_path = graph._embeddings_path
+    if os.path.exists(mem_path):
+        shutil.copy2(mem_path, orig_mem)
+    if os.path.exists(emb_path):
+        shutil.copy2(emb_path, orig_emb)
+
+    try:
+        # Run algorithm pass.
+        algo_results = _run_consolidation_pass(graph, run_id, "algorithm")
+
+        # Restore original state.
+        if os.path.exists(orig_mem):
+            shutil.copy2(orig_mem, mem_path)
+        if os.path.exists(orig_emb):
+            shutil.copy2(orig_emb, emb_path)
+        graph.load()
+
+        # Run LLM pass.
+        llm_results = _run_consolidation_pass(graph, run_id, "llm")
+
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # Bucket by member sets.
+    algo_sets = {frozenset(r["member_ids"]): r for r in algo_results}
+    llm_sets = {frozenset(r["member_ids"]): r for r in llm_results}
+
+    agreement: dict = {}
+    algorithm_only: dict = {}
+    llm_only: dict = {}
+
+    all_keys = set(algo_sets.keys()) | set(llm_sets.keys())
+    for members in all_keys:
+        info = algo_sets.get(members) or llm_sets.get(members) or {}
+        label = info.get("label", f"cluster of {len(members)} nodes")
+
+        if members in algo_sets and members in llm_sets:
+            agreement[label] = list(members)
+        elif members in algo_sets:
+            algorithm_only[label] = list(members)
+        else:
+            llm_only[label] = list(members)
+
+    return {
+        "agreement": agreement,
+        "algorithm_only": algorithm_only,
+        "llm_only": llm_only,
+    }
+
+
+def _print_diff_report(diff: dict) -> None:
+    """Print a human-readable diff report."""
+    print("\n" + "=" * 70)
+    print("CLUSTERING METHOD DIFF")
+    print("=" * 70)
+
+    agreement = diff.get("agreement", {})
+    algo_only = diff.get("algorithm_only", {})
+    llm_only = diff.get("llm_only", {})
+
+    print(
+        "\nAgreement (both methods): %d groups" % len(agreement),
+    )
+    for label, members in agreement.items():
+        print("  [common] %s (%d nodes)" % (label, len(members)))
+
+    print(
+        "\nAlgorithm-only (cosine found, LLM did not): %d groups" % len(algo_only),
+    )
+    for label, members in algo_only.items():
+        print("  [algo] %s" % label)
+
+    print(
+        "\nLLM-only (LLM found, cosine missed): %d groups" % len(llm_only),
+    )
+    for label, members in llm_only.items():
+        print("  [llm] %s" % label)
+
+    if llm_only:
+        print(
+            "\nLLM-only groups are the value the LLM adds -- "
+            "categorical groupings cosine cannot detect."
+        )
+    print("=" * 70)
+
+
 def _print_dry_run_report(
     all_abstractions: list[dict],
     graph: GraphStore,
@@ -304,14 +448,34 @@ def main() -> None:
         "--seed", type=int, default=42,
         help="Random seed for deterministic clustering (default: 42)",
     )
+    parser.add_argument(
+        "--cluster-method", choices=["algorithm", "llm", "hybrid", "diff"],
+        default=None,
+        help=(
+            "Clustering method. 'diff' runs both and compares (dry-run default). "
+            "'hybrid' runs algorithm then LLM on leftovers (apply default). "
+            "Leave unset for auto-selection."
+        ),
+    )
     args = parser.parse_args()
 
     run_id = args.run_id or _now_iso()
     apply_mode = args.apply
+
+    # Auto-select method if not explicitly set.
+    if args.cluster_method:
+        method = args.cluster_method
+    elif apply_mode:
+        method = "hybrid"
+    else:
+        method = "diff"
+
     mode = "recent" if args.recent else "full"
     recent_days = args.recent or 7
 
-    logger.info("Dreamer run: %s mode=%s apply=%s", run_id, mode, apply_mode)
+    logger.info(
+        "Dreamer run: %s method=%s apply=%s", run_id, method, apply_mode,
+    )
 
     # Load graph.
     graph = GraphStore(args.memory_path)
@@ -326,44 +490,26 @@ def main() -> None:
         print("Graph is empty -- nothing to consolidate.")
         return
 
-    # Snapshot before (only used to compute diff in non-apply mode).
+    # Diff mode: run both methods and compare, no save.
+    if method == "diff":
+        diff = _diff_consolidation(graph, run_id)
+        _print_diff_report(diff)
+        print("\nDiff mode -- no changes written.")
+        print("Run with --cluster-method hybrid --apply to commit.")
+        return
+
+    # Standard single-method consolidation.
     _before = snapshot(graph) if not apply_mode else None
 
     if not apply_mode:
         print(f"\n--- DRY RUN (run_id={run_id}) ---")
 
-    # Consolidation loop -- level-agnostic, data-driven termination.
-    # Start with the initial working set.
     initial_layer = _select_working_set(graph, mode, recent_days)
     if not initial_layer:
         logger.info("Working set is empty -- nothing to consolidate")
         return
 
-    layer = initial_layer
-    all_abstractions: list[dict] = []
-
-    while True:
-        new_abs = _consolidate_layer(
-            graph, layer, run_id, all_abstractions, method="hybrid",
-        )
-        if not new_abs:
-            logger.info(
-                "Consolidation complete -- no new abstractions at this layer",
-            )
-            break
-
-        all_abstractions.extend(new_abs)
-        # Next layer: the abstractions we just created.
-        layer = [a["id"] for a in new_abs]
-
-        # Safety stop only (not a design tier).
-        max_level = max(
-            (graph.get_node(a["id"]).level for a in all_abstractions),
-            default=0,
-        )
-        if max_level >= MAX_LEVELS:
-            logger.warning("Hit MAX_LEVELS=%d -- capping hierarchy", MAX_LEVELS)
-            break
+    all_abstractions = _run_consolidation_pass(graph, run_id, method)
 
     # Report / apply.
     if apply_mode:
