@@ -67,14 +67,14 @@ class TestCrossSourceCorroboration:
 
         # ── First source: conv_01 facts ─────────────────────────────────
         r1 = store_facts(
-            [{"fact": f, "topic": ""} for f in [f1, f2]],
+            [{"fact": f, "topics": []} for f in [f1, f2]],
             "src1", "conv_01", graph,
         )
         assert r1["new_nodes"] == 2
 
         # ── Second source: conv_02 facts ────────────────────────────────
         r2 = store_facts(
-            [{"fact": f, "topic": ""} for f in [g1, g2, g3, g4, g5]],
+            [{"fact": f, "topics": []} for f in [g1, g2, g3, g4, g5]],
             "src2", "conv_02", graph,
         )
         assert r2["new_nodes"] == 3        # g3, g4, g5

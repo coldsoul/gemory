@@ -47,10 +47,10 @@ class TestMergeAboveDedup:
 
         graph = GraphStore(str(tmp_path / "memory.json"))
 
-        r1 = store_facts([{"fact": "A", "topic": ""}], "src1", None, graph)
+        r1 = store_facts([{"fact": "A", "topics": []}], "src1", None, graph)
         assert r1["new_nodes"] == 1
 
-        r2 = store_facts([{"fact": "B", "topic": ""}], "src2", None, graph)
+        r2 = store_facts([{"fact": "B", "topics": []}], "src2", None, graph)
         assert r2["new_nodes"] == 0
         assert r2["corroborated"] == 1
         assert r2["skipped"] == 0
@@ -74,11 +74,11 @@ class TestEdgeBetweenThresholds:
 
         graph = GraphStore(str(tmp_path / "memory.json"))
 
-        r1 = store_facts([{"fact": "A", "topic": ""}], "src1", None, graph)
+        r1 = store_facts([{"fact": "A", "topics": []}], "src1", None, graph)
         assert r1["new_nodes"] == 1
         node_a = graph.all_nodes()[0].id
 
-        r2 = store_facts([{"fact": "C", "topic": ""}], "src2", None, graph)
+        r2 = store_facts([{"fact": "C", "topics": []}], "src2", None, graph)
         assert r2["new_nodes"] == 1
         assert r2["corroborated"] == 0
         assert r2["skipped"] == 0
@@ -105,8 +105,8 @@ class TestNoEdgeBelowEdge:
 
         graph = GraphStore(str(tmp_path / "memory.json"))
 
-        r1 = store_facts([{"fact": "A", "topic": ""}], "src1", None, graph)
-        r2 = store_facts([{"fact": "D", "topic": ""}], "src2", None, graph)
+        r1 = store_facts([{"fact": "A", "topics": []}], "src1", None, graph)
+        r2 = store_facts([{"fact": "D", "topics": []}], "src2", None, graph)
         assert r2["new_nodes"] == 1
 
         nodes = graph.all_nodes()

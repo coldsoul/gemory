@@ -29,11 +29,12 @@ class TestTopicEndToEnd:
         print("-" * 60)
         for i, item in enumerate(facts, 1):
             fact_text = item.get("fact", "")
-            topic = item.get("topic", "")
-            print(f"  {i}. [{topic or 'no topic'}]")
+            topics = item.get("topics", [])
+            topic_str = ", ".join(topics) if topics else "no topic"
+            print(f"  {i}. [{topic_str}]")
             print(f"     {fact_text}")
 
-        non_empty = [f for f in facts if f.get("topic", "").strip()]
+        non_empty = [f for f in facts if f.get("topics", [])]
         empty = len(facts) - len(non_empty)
         print(f"\nSummary: {len(non_empty)} with topics, {empty} without")
         print("Review: Are topics consistent (same subject → same phrase)?")

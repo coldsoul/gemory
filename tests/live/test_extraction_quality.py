@@ -37,8 +37,8 @@ class TestExtractionQuality:
 
         print(f"\n--- conv_01 extraction ({len(facts)} facts) ---")
         for i, item in enumerate(facts, 1):
-            topic = item.get("topic", "")
-            topic_suffix = f" [topic: {topic}]" if topic else ""
+            topics = item.get("topics", [])
+            topic_suffix = f" [topics: {', '.join(topics)}]" if topics else ""
             print(f"  {i}. {item['fact']}{topic_suffix}")
 
         print(f"\nExpected ({len(expected['facts'])} facts):")
@@ -58,8 +58,8 @@ class TestExtractionQuality:
 
         print(f"\n--- conv_02 extraction ({len(facts)} facts) ---")
         for i, item in enumerate(facts, 1):
-            topic = item.get("topic", "")
-            topic_suffix = f" [topic: {topic}]" if topic else ""
+            topics = item.get("topics", [])
+            topic_suffix = f" [topics: {', '.join(topics)}]" if topics else ""
             print(f"  {i}. {item['fact']}{topic_suffix}")
 
         print(f"\nExpected ({len(expected['facts'])} facts):")

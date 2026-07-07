@@ -27,7 +27,7 @@ class TestExactRerunIdempotency:
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         facts = _load_expected("conv_01.expected.json")
-        fact_items = [{"fact": f, "topic": ""} for f in facts]
+        fact_items = [{"fact": f, "topics": []} for f in facts]
         transcript_path = FIXTURE_DIR / "conv_01.txt"
         source_id = compute_source_id(transcript_path.read_text())
 
@@ -53,7 +53,7 @@ class TestGrownTranscriptIdempotency:
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         original_facts = _load_expected("conv_01.expected.json")
-        original_items = [{"fact": f, "topic": ""} for f in original_facts]
+        original_items = [{"fact": f, "topics": []} for f in original_facts]
         transcript_path = FIXTURE_DIR / "conv_01.txt"
         source_id = compute_source_id(transcript_path.read_text())
 
@@ -65,7 +65,7 @@ class TestGrownTranscriptIdempotency:
 
         # Second run: original facts + one new fact, SAME source_id
         new_fact = "The user wants to add a consolidation process."
-        grown_items = original_items + [{"fact": new_fact, "topic": ""}]
+        grown_items = original_items + [{"fact": new_fact, "topics": []}]
 
         r = store_facts(grown_items, source_id, None, empty_graph)
         assert r["new_nodes"] == 1

@@ -31,7 +31,7 @@ class TestSaveLoadRoundtrip:
 
         graph = GraphStore(tmp_graph_path)
         raw_facts = _load_expected("conv_01.expected.json")
-        store_facts([{"fact": f, "topic": ""} for f in raw_facts], "src1", None, graph)
+        store_facts([{"fact": f, "topics": []} for f in raw_facts], "src1", None, graph)
 
         # Capture in-memory state
         nodes_before = graph.all_nodes()
@@ -65,7 +65,7 @@ class TestMemoryJsonPrettyPrinted:
 
         graph = GraphStore(tmp_graph_path)
         raw_facts = _load_expected("conv_01.expected.json")
-        store_facts([{"fact": f, "topic": ""} for f in raw_facts], "src1", None, graph)
+        store_facts([{"fact": f, "topics": []} for f in raw_facts], "src1", None, graph)
 
         with open(tmp_graph_path) as f:
             content = f.read()
