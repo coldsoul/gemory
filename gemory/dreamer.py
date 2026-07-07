@@ -16,8 +16,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 # Ensure project root on sys.path so ``from gemory.*`` imports resolve
-# when this script is run directly (e.g. ``uv run dreamer.py``).
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# when this script is run directly (e.g. ``uv run gemory/dreamer.py``).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Configure logging
 logging.basicConfig(
