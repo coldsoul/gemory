@@ -20,7 +20,7 @@ class TestTopicEndToEnd:
 
     def test_topic_extraction_review(self):
         """Print fact+topic pairs for conv_02 for human review."""
-        import gemory.llm as llm
+        import src.llm as llm
 
         transcript = (FIXTURE_DIR / "conv_02.txt").read_text()
         facts = llm.extract_facts(transcript)

@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 import networkx as nx
 import numpy as np
 
-from gemory import config
-from gemory.models import Edge, Node
+from src import config
+from src.models import Edge, Node
 
 
 # ---------------------------------------------------------------------------

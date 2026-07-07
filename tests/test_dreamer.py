@@ -10,9 +10,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from gemory import config
-from gemory.cluster import cluster_nodes
-from gemory.graph import GraphStore
+from src import config
+from src.cluster import cluster_nodes
+from src.graph import GraphStore
 from tests.stubs import LookupStub, vectors_with_cosines
 
 
@@ -108,7 +108,7 @@ class TestBasicAbstraction:
         store, memory_path = populated_graph
         all_ids = [n.id for n in store.all_nodes()]
 
-        import dreamer as dr
+        from src import dreamer as dr
 
         # Stub LLM calls
         stub_embed = LookupStub(
@@ -151,7 +151,7 @@ class TestMinSizeRespected:
         store, _ = small_graph
         all_ids = [n.id for n in store.all_nodes()]
 
-        import dreamer as dr
+        from src import dreamer as dr
 
         stub = LookupStub({}, dim=3)
         monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
@@ -168,7 +168,7 @@ class TestConsolidationIdempotency:
         store, _ = populated_graph
         all_ids = [n.id for n in store.all_nodes()]
 
-        import dreamer as dr
+        from src import dreamer as dr
 
         stub_embed = LookupStub(
             {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
@@ -200,7 +200,7 @@ class TestAbstractionProvenance:
         store, _ = populated_graph
         all_ids = [n.id for n in store.all_nodes()]
 
-        import dreamer as dr
+        from src import dreamer as dr
 
         stub_embed = LookupStub(
             {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
@@ -231,7 +231,7 @@ class TestAbstractionLevel:
         store, _ = populated_graph
         all_ids = [n.id for n in store.all_nodes()]
 
-        import dreamer as dr
+        from src import dreamer as dr
 
         stub_embed = LookupStub(
             {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
@@ -261,7 +261,7 @@ class TestDryRunWritesNothing:
         store, memory_path = populated_graph
         store.save()  # ensure file is written
 
-        import dreamer as dr
+        from src import dreamer as dr
 
         # Read before
         with open(memory_path) as f:
@@ -313,7 +313,7 @@ class TestApplyWritesAndBacksUp:
                 linked += 1
         store.save()
 
-        import dreamer as dr
+        from src import dreamer as dr
 
         stub_embed = LookupStub(
             {"Auto Theme": [1.0, 0.0, 0.0]},
@@ -352,8 +352,8 @@ class TestRecursiveConsolidation:
     """Multiple levels of hierarchy: topics -> themes."""
 
     def test_recursive_consolidation(self, monkeypatch, tmp_path):
-        import dreamer as dr
-        from gemory.graph import GraphStore
+        from src import dreamer as dr
+        from src.graph import GraphStore
         import numpy as np
         from tests.stubs import vectors_with_cosines
 
@@ -418,9 +418,9 @@ class TestTopicGroupsFarApartFacts:
     """Facts far apart in embedding but sharing a topic are grouped by topic."""
 
     def test_topic_groups_far_apart_facts(self, monkeypatch, tmp_path) -> None:
-        import dreamer as dr
-        from gemory.graph import GraphStore
-        from gemory.topics import resolve_topic
+        from src import dreamer as dr
+        from src.graph import GraphStore
+        from src.topics import resolve_topic
 
         store = GraphStore(str(tmp_path / "memory.json"))
 
@@ -447,7 +447,7 @@ class TestTopicGroupsFarApartFacts:
              "FPV drones": [0.0, 1.0, 0.0, 0.0]},
             dim=4,
         )
-        monkeypatch.setattr("gemory.topics.embed", topic_stub.embed)
+        monkeypatch.setattr("src.topics.embed", topic_stub.embed)
 
         topic_gemory = resolve_topic(store, "Gemory")
         topic_fpv = resolve_topic(store, "FPV drones")
@@ -491,8 +491,8 @@ class TestLevel2ThemeGrouping:
     """Similar topics cluster into themes at level 2."""
 
     def test_level2_theme_grouping(self, monkeypatch, tmp_path) -> None:
-        import dreamer as dr
-        from gemory.graph import GraphStore
+        from src import dreamer as dr
+        from src.graph import GraphStore
         import numpy as np
         from tests.stubs import vectors_with_cosines
 
@@ -565,8 +565,8 @@ class TestIdempotencyPreservesTopics:
     """Re-running the dreamer does not duplicate topics or themes."""
 
     def test_idempotency_preserves_topics(self, monkeypatch, tmp_path) -> None:
-        import dreamer as dr
-        from gemory.graph import GraphStore
+        from src import dreamer as dr
+        from src.graph import GraphStore
         import numpy as np
         from tests.stubs import vectors_with_cosines
 

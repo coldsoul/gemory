@@ -48,18 +48,18 @@ See `.env.example` for all configurable options (thresholds, model names, paths)
 ### Stdio (default)
 
 ```bash
-uv run gemory/server.py
+uv run src/server.py
 ```
 
 After running `uv sync --extra dev` the console script `uv run gemory` also works.
 
-The server loads `memory.json` and `embeddings.json` from the project directory.
+The server loads `memory.json` and `embeddings.json` from the `data/` directory.
 If they don't exist, it starts with an empty graph.
 
 ### HTTP SSE (experimental)
 
 ```bash
-uv run gemory/server.py --http
+uv run src/server.py --http
 ```
 
 Starts on `http://127.0.0.1:8765/sse`.
@@ -78,7 +78,7 @@ In `~/Library/Application Support/Claude/claude_desktop_config.json`:
     "gemory": {
       "command": "/absolute/path/to/gemory/.venv/bin/python",
       "args": [
-        "/absolute/path/to/gemory/gemory/server.py"
+        "/absolute/path/to/gemory/src/server.py"
       ],
       "env": {
         "GEMORY_LOG_FILE": "/absolute/path/to/gemory/gemory.log"
@@ -104,7 +104,7 @@ Note: the `command` path above uses Unix-style absolute paths — adjust for Win
 For clients that support URL-based registration, run the server in HTTP SSE mode:
 
 ```bash
-uv run gemory/server.py --http
+uv run src/server.py --http
 ```
 
 Then configure the client URL to `http://127.0.0.1:8765/sse`.
@@ -146,10 +146,10 @@ Call this at the start of a conversation to load context.
 
 ## Data model
 
-The graph is stored as two JSON files:
+The graph is stored as two JSON files under `data/`:
 
-- **`memory.json`** — the graph structure: nodes (facts with content, confidence, provenance timestamps) and edges (weighted relationships with relation types)
-- **`embeddings.json`** — a sidecar mapping node IDs to embedding vectors (kept separate so `memory.json` stays human-readable and diff-friendly)
+- **`data/memory.json`** — the graph structure: nodes (facts with content, confidence, provenance timestamps) and edges (weighted relationships with relation types)
+- **`data/embeddings.json`** — a sidecar mapping node IDs to embedding vectors (kept separate so `memory.json` stays human-readable and diff-friendly)
 
 Both are gitignored — they contain runtime data and potentially sensitive extracted facts.
 
@@ -158,7 +158,7 @@ Both are gitignored — they contain runtime data and potentially sensitive extr
 Render an interactive HTML graph of the stored facts:
 
 ```bash
-uv run python scripts/visualize.py memory.json -o graph.html
+uv run python scripts/visualize.py data/memory.json -o graph.html
 open graph.html
 ```
 
@@ -177,7 +177,7 @@ All 41 deterministic tests use stubbed embeddings — no network or API keys nee
 
 The test harness includes frozen transcript fixtures, controlled vector construction
 via Cholesky decomposition, and a graph snapshot/diff helper for declarative assertions.
-See [TESTING.md](TESTING.md) for the full harness documentation.
+See [TESTING.md](docs/TESTING.md) for the full harness documentation.
 
 Live sanity tests (real API calls, skipped by default):
 
@@ -188,7 +188,7 @@ GEMORY_LIVE=1 uv run pytest tests/live/ -v -s
 ### Architecture
 
 ```
-gemory/
+src/
 ├── server.py       # MCP server: remember + recall tools (stdio + SSE)
 ├── graph.py        # GraphStore: in-memory DiGraph + JSON persistence
 ├── llm.py          # DeepSeek wrapper: fact extraction + embeddings
@@ -196,10 +196,15 @@ gemory/
 ├── recall.py       # Query → embed → similarity search → formatted results
 ├── config.py       # Environment-driven constants and thresholds
 ├── models.py       # Node and Edge dataclasses
-├── memory.json     # Human-readable graph (runtime, gitignored)
-└── embeddings.json # Embedding sidecar (runtime, gitignored)
 scripts/
-└── visualize.py    # pyvis interactive graph visualizer
+├── visualize.py    # pyvis interactive graph visualizer
+data/                # Runtime data (gitignored)
+├── memory.json
+└── embeddings.json
+docs/
+├── DREAMER.md       # Dreamer documentation
+├── TESTING.md       # Test harness documentation
+└── instructions/    # Implementation specs
 tests/
 ├── fixtures/       # Frozen transcripts + expectation files
 ├── live/           # Live sanity suite (GEMORY_LIVE=1, manual only)

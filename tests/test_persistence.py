@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from gemory.extractor import store_facts
-from gemory.graph import GraphStore
+from src.extractor import store_facts
+from src.graph import GraphStore
 from tests.conftest import make_lookup_stub
 from tests.stubs import LookupStub
 
@@ -26,7 +26,7 @@ class TestSaveLoadRoundtrip:
     def test_save_load_roundtrip(
         self, hash_stub, tmp_graph_path, monkeypatch,
     ) -> None:
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         graph = GraphStore(tmp_graph_path)
@@ -60,7 +60,7 @@ class TestMemoryJsonPrettyPrinted:
     def test_memory_json_pretty_printed(
         self, hash_stub, tmp_graph_path, monkeypatch,
     ) -> None:
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         graph = GraphStore(tmp_graph_path)
@@ -81,7 +81,7 @@ class TestNodeWithoutEmbedding:
     """Node without a matching embedding raises ValueError on load."""
 
     def test_node_without_embedding_errors(self, tmp_path) -> None:
-        from gemory.config import EMBEDDINGS_PATH
+        from src.config import EMBEDDINGS_PATH
         mem_path = str(tmp_path / "memory.json")
         emb_path = os.path.join(tmp_path, EMBEDDINGS_PATH)
 
@@ -103,7 +103,7 @@ class TestOrphanEmbedding:
     """Orphan embedding (no matching node) is silently tolerated."""
 
     def test_orphan_embedding_tolerated(self, tmp_path) -> None:
-        from gemory.config import EMBEDDINGS_PATH
+        from src.config import EMBEDDINGS_PATH
         mem_path = str(tmp_path / "memory.json")
         emb_path = os.path.join(tmp_path, EMBEDDINGS_PATH)
 

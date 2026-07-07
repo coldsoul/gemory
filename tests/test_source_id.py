@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from gemory.extractor import compute_source_id
+from src.extractor import compute_source_id
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 

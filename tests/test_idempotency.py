@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from gemory.extractor import compute_source_id, store_facts
+from src.extractor import compute_source_id, store_facts
 from tests.graph_diff import diff, snapshot
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -23,7 +23,7 @@ class TestExactRerunIdempotency:
     def test_exact_rerun_idempotency(
         self, hash_stub, empty_graph, monkeypatch,
     ) -> None:
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         facts = _load_expected("conv_01.expected.json")
@@ -49,7 +49,7 @@ class TestGrownTranscriptIdempotency:
     def test_grown_transcript_idempotency(
         self, hash_stub, empty_graph, monkeypatch, tmp_path,
     ) -> None:
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         original_facts = _load_expected("conv_01.expected.json")

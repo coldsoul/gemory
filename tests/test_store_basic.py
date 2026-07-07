@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from gemory.extractor import store_facts
-from gemory.graph import GraphStore
+from src.extractor import store_facts
+from src.graph import GraphStore
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
@@ -25,7 +25,7 @@ class TestFreshStore:
         self, hash_stub, empty_graph, monkeypatch,
     ) -> None:
         """Feed conv_01 expected facts into store_facts with hash_stub."""
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         facts = _load_expected("conv_01.expected.json")
@@ -56,7 +56,7 @@ class TestMemoryJsonNoEmbeddings:
         self, hash_stub, tmp_graph_path, monkeypatch,
     ) -> None:
         """Store facts, save, read memory.json raw, assert no embedding keys."""
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         graph = GraphStore(tmp_graph_path)
@@ -87,7 +87,7 @@ class TestEmptyExtraction:
     def test_empty_extraction_produces_zero_nodes(
         self, hash_stub, empty_graph, monkeypatch,
     ) -> None:
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", hash_stub.embed)
 
         result = store_facts([], "test-src", None, empty_graph)

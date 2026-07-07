@@ -1,9 +1,9 @@
-"""Tests for :func:`gemory.recall.recall` using stub embeddings."""
+"""Tests for :func:`src.recall.recall` using stub embeddings."""
 
 import pytest
 
-from gemory.graph import GraphStore
-from gemory.recall import recall
+from src.graph import GraphStore
+from src.recall import recall
 from tests.stubs import LookupStub
 
 
@@ -43,7 +43,7 @@ class TestRecall:
         self, populated_graph, monkeypatch,
     ) -> None:
         """A query matching a specific fact should rank that fact first."""
-        import gemory.recall as rec_mod
+        import src.recall as rec_mod
         stub = _build_recall_lookup()
         monkeypatch.setattr(rec_mod.llm, "embed", stub.embed)
 
@@ -58,7 +58,7 @@ class TestRecall:
     def test_recall_respects_top_k(
         self, populated_graph, monkeypatch,
     ) -> None:
-        import gemory.recall as rec_mod
+        import src.recall as rec_mod
         stub = _build_recall_lookup()
         monkeypatch.setattr(rec_mod.llm, "embed", stub.embed)
 
@@ -66,7 +66,7 @@ class TestRecall:
         assert output.count("[#") == 2
 
     def test_recall_empty_graph(self, tmp_path, monkeypatch) -> None:
-        import gemory.recall as rec_mod
+        import src.recall as rec_mod
         stub = _build_recall_lookup()
         monkeypatch.setattr(rec_mod.llm, "embed", stub.embed)
 

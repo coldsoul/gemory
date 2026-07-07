@@ -1,9 +1,9 @@
-"""Tests for :mod:`gemory.topics` — topic registry with match-or-create."""
+"""Tests for :mod:`src.topics` — topic registry with match-or-create."""
 
 import numpy as np
 import pytest
 
-from gemory import config
+from src import config
 from tests.stubs import LookupStub, vectors_with_cosines
 
 
@@ -14,7 +14,7 @@ from tests.stubs import LookupStub, vectors_with_cosines
 @pytest.fixture
 def topic_graph(tmp_graph_path):
     """A fresh, empty GraphStore for topic tests."""
-    from gemory.graph import GraphStore
+    from src.graph import GraphStore
     return GraphStore(tmp_graph_path)
 
 
@@ -27,7 +27,7 @@ class TestResolveTopic:
 
     def test_creates_topic_on_first_use(self, topic_graph, monkeypatch) -> None:
         """First call with a non-empty topic creates a topic node."""
-        import gemory.topics as top
+        import src.topics as top
         stub = LookupStub({"Gemory": [1.0, 0.0, 0.0]}, dim=3)
         monkeypatch.setattr(top, "embed", stub.embed)
 
@@ -44,7 +44,7 @@ class TestResolveTopic:
         self, topic_graph, monkeypatch,
     ) -> None:
         """A close variant resolves to the same existing topic node."""
-        import gemory.topics as top
+        import src.topics as top
 
         # Two topic vectors at cosine 0.90 (above default TOPIC_MATCH_THRESHOLD=0.85)
         gram = np.array([[1.0, 0.90], [0.90, 1.0]])
@@ -70,7 +70,7 @@ class TestResolveTopic:
         self, topic_graph, monkeypatch,
     ) -> None:
         """A far-apart topic string creates a new topic node."""
-        import gemory.topics as top
+        import src.topics as top
 
         # "Gemory" at basis [1,0,0], "FPV drones" at basis [0,1,0] (cosine 0)
         stub = LookupStub({
@@ -88,7 +88,7 @@ class TestResolveTopic:
         assert len(topic_graph.get_topic_nodes()) == 2
 
     def test_empty_topic_returns_none(self, topic_graph, monkeypatch) -> None:
-        import gemory.topics as top
+        import src.topics as top
         stub = LookupStub({}, dim=3)
         monkeypatch.setattr(top, "embed", stub.embed)
 
@@ -99,7 +99,7 @@ class TestResolveTopic:
     def test_whitespace_only_topic_returns_none(
         self, topic_graph, monkeypatch,
     ) -> None:
-        import gemory.topics as top
+        import src.topics as top
         stub = LookupStub({}, dim=3)
         monkeypatch.setattr(top, "embed", stub.embed)
 

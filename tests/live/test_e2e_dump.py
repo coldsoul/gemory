@@ -29,9 +29,9 @@ class TestEndToEndDump:
 
     def test_end_to_end(self, tmp_path):
         """Feed conv_01 through real extractor and store, dump graph."""
-        import gemory.llm as llm
-        from gemory.graph import GraphStore
-        from gemory.extractor import compute_source_id, store_facts
+        import src.llm as llm
+        from src.graph import GraphStore
+        from src.extractor import compute_source_id, store_facts
 
         transcript = (FIXTURE_DIR / "conv_01.txt").read_text()
 

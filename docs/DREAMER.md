@@ -15,7 +15,7 @@ the full clustering and abstraction in memory but never touches your
 graph files on disk:
 
 ```
-uv run python dreamer.py
+uv run python src/dreamer.py
 ```
 
 The output shows each proposed abstraction: its level, label, and the
@@ -26,7 +26,7 @@ member facts it would summarize. Review this output carefully.
 Once you are satisfied with the dry-run output, apply the changes:
 
 ```
-uv run python dreamer.py --apply
+uv run python src/dreamer.py --apply
 ```
 
 This creates timestamped backups of both ``memory.json`` and
@@ -40,7 +40,7 @@ To consolidate only recently active nodes (useful when you have a large
 graph and run the Dreamer periodically):
 
 ```
-uv run python dreamer.py --recent 7
+uv run python src/dreamer.py --recent 7
 ```
 
 This selects nodes whose provenance timestamps fall within the last
@@ -50,13 +50,13 @@ The rest of the graph is left untouched in that run.
 ### Specifying a custom memory path
 
 ```
-uv run python dreamer.py --memory-path /path/to/memory.json
+uv run python src/dreamer.py --memory-path /path/to/memory.json
 ```
 
 ### Setting the run id
 
 ```
-uv run python dreamer.py --run-id "my-run-20260706"
+uv run python src/dreamer.py --run-id "my-run-20260706"
 ```
 
 The run id appears in abstraction provenance for traceability.

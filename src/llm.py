@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 import openai
 
-from gemory import config
+from src import config
 
 
 # ---------------------------------------------------------------------------
