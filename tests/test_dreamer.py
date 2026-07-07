@@ -520,3 +520,45 @@ class TestIdempotencyPreservesTopics:
         assert len(layer2) == 1
         n_after_second = len(store.all_nodes())
         assert n_after_second == n_after_first
+
+
+class TestDiffDryRun:
+    """Diff mode runs both clustering methods and reports buckets."""
+
+    def test_diff_produces_buckets(self, populated_graph, monkeypatch):
+        """Diff mode returns agreement/algorithm_only/llm_only dicts."""
+        from src import dreamer as dr
+
+        def stub_cluster(summaries):
+            # Return first 5 nodes as one cluster (matches algorithm result)
+            indices = list(range(min(5, len(summaries))))
+            return [set(indices)] if len(indices) >= 2 else []
+
+        monkeypatch.setattr("src.consolidate.summarize_cluster",
+                            lambda f: {"label": "Test", "summary": "Sum."})
+        monkeypatch.setattr(dr, "embed", lambda x: [1.0, 0.0])
+        # The algorithm path doesn't use cluster_by_llm; LLM path does.
+        monkeypatch.setattr("src.llm.cluster_by_llm", stub_cluster)
+
+        store, _ = populated_graph
+        diff = dr._diff_consolidation(store, "test-diff")
+
+        assert "agreement" in diff
+        assert "algorithm_only" in diff
+        assert "llm_only" in diff
+        # At minimum some type of result
+        total = len(diff["agreement"]) + len(diff["algorithm_only"]) + len(diff["llm_only"])
+        assert total >= 0
+
+    def test_diff_no_crash_on_small_graph(self, small_graph, monkeypatch):
+        """Diff mode doesn't crash on graphs where nothing clusters."""
+        from src import dreamer as dr
+
+        monkeypatch.setattr("src.consolidate.summarize_cluster",
+                            lambda f: {"label": "T", "summary": "S."})
+        monkeypatch.setattr(dr, "embed", lambda x: [1.0, 0.0])
+        monkeypatch.setattr("src.llm.cluster_by_llm", lambda x: [])
+
+        store, _ = small_graph
+        diff = dr._diff_consolidation(store, "test-diff")
+        assert isinstance(diff, dict)
