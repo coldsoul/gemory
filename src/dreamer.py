@@ -34,10 +34,12 @@ from src.config import (
     MAX_LEVELS,
     MEMORY_PATH,
     MIN_CLUSTER_SIZE,
+    MIN_REACH,
 )
 from src.consolidate import cluster_layer, summarize_layer
 from src.graph import GraphStore
 from src.llm import embed
+from src.reach import compute_reach, update_reach
 from tests.graph_diff import snapshot
 
 
@@ -81,13 +83,11 @@ def _select_working_set(
     all_nodes = graph.all_nodes()
 
     if mode == "full":
-        # All nodes
         node_ids = [n.id for n in all_nodes]
         logger.info("Working set (--full): %d nodes", len(node_ids))
         return node_ids
 
     if mode == "recent":
-        cutoff = _now_iso()
         threshold = (datetime.now(timezone.utc) - timedelta(days=recent_days)).isoformat()
 
         recent_ids = set()
@@ -98,7 +98,6 @@ def _select_working_set(
                     recent_ids.add(node.id)
                     break
 
-        # Include immediate neighbours
         extended = set(recent_ids)
         for nid in recent_ids:
             for neighbor in graph.get_neighbors(nid):
@@ -117,29 +116,19 @@ def _select_working_set(
     return []
 
 
+# ---------------------------------------------------------------------------
+# Core consolidation
+# ---------------------------------------------------------------------------
+
 def _create_abstraction(
     graph: GraphStore,
     cluster: set[str],
     run_id: str,
     existing_abstractions: list[dict],
-    consolidation_level: int = 1,
 ) -> str | None:
     """Create an abstraction node for a cluster, or update an existing one.
 
-    Parameters
-    ----------
-    graph
-        The graph store.
-    cluster
-        Set of member node IDs.
-    run_id
-        Identifier for this dreamer run.
-    existing_abstractions
-        Previously created abstractions (for overlap checking).
-    consolidation_level
-        The recursion level in the dreamer (1=topics, 2+=themes).
-        Used to set ``abstraction_kind`` on the created node.
-
+    Checks existing abstractions via Jaccard overlap before creating.
     Returns the abstraction node ID, or ``None`` if no creation was needed.
     """
     member_ids = list(cluster)
@@ -187,7 +176,6 @@ def _create_abstraction(
     abs_level = max_child_level + 1
 
     # Create the abstraction node.
-    abstraction_kind_val = "theme" if consolidation_level >= 2 else ""
     abs_id = graph.add_node(
         content=summary,
         embedding=embedding,
@@ -199,7 +187,6 @@ def _create_abstraction(
         },
         kind="abstraction",
         label=label,
-        abstraction_kind=abstraction_kind_val,
     )
 
     # Set level.
@@ -217,112 +204,48 @@ def _create_abstraction(
     return abs_id
 
 
-def _consolidate_level(
+def _consolidate_layer(
     graph: GraphStore,
     node_ids: list[str],
     run_id: str,
     existing_abstractions: list[dict],
-    level: int,
+    method: str = "hybrid",
 ) -> list[dict]:
-    """Run one level of consolidation: cluster -> abstract.
+    """Consolidate one layer: cluster, gate by reach, create abstractions.
 
-    At level 2+ nodes that already have a parent (are already under a
-    theme) are excluded to avoid re-clustering.
-
-    Returns a list of new abstraction dicts ``{id, member_ids}``.
+    Level-agnostic: identical operation at every height.  No level
+    number is referenced.
     """
-    # For level 2+, skip nodes that already have a parent.
-    if level >= 2:
-        unparented = [nid for nid in node_ids if not graph.get_parents(nid)]
-        if len(unparented) < len(node_ids):
-            logger.info(
-                "Skipping %d already-parented nodes at level %d",
-                len(node_ids) - len(unparented), level,
-            )
-        node_ids = unparented
+    logger.info(
+        "--- Consolidating layer (%d nodes, method=%s) ---",
+        len(node_ids), method,
+    )
 
-    if len(node_ids) < MIN_CLUSTER_SIZE:
-        logger.info(
-            "Too few unparented nodes (%d < %d) at level %d, stopping",
-            len(node_ids), MIN_CLUSTER_SIZE, level,
-        )
-        return []
-
-    logger.info("--- Consolidation level %d (%d nodes) ---", level, len(node_ids))
-
-    clusters = cluster_layer(graph, node_ids)
+    clusters = cluster_layer(graph, node_ids, method=method)
     if not clusters:
-        logger.info("No qualifying clusters at level %d, stopping", level)
+        logger.info("No clusters formed -- layer complete")
         return []
 
     new_abstractions: list[dict] = []
     for cluster in clusters:
+        # Gate: only create abstraction if reach >= MIN_REACH.
+        reach = compute_reach(graph, list(cluster))
+        if reach < MIN_REACH:
+            logger.info(
+                "Skipping cluster of size %d: reach=%d < MIN_REACH=%d",
+                len(cluster), reach, MIN_REACH,
+            )
+            continue
+
         abs_id = _create_abstraction(
             graph, cluster, run_id, existing_abstractions,
-            consolidation_level=level,
         )
         if abs_id:
-            new_abstractions.append({
-                "id": abs_id,
-                "member_ids": list(cluster),
-            })
+            update_reach(graph, abs_id)
+            member_ids = list(cluster)
+            new_abstractions.append({"id": abs_id, "member_ids": member_ids})
 
     return new_abstractions
-
-
-def _consolidate_level_1(
-    graph: GraphStore,
-    run_id: str,
-) -> list[dict]:
-    """Level 1: enrich topic nodes that have enough child facts.
-
-    Rather than clustering by embedding similarity, this uses the topic
-    registry's membership edges to group facts under their canonical topic
-    nodes.  A topic is enriched only when it has at least ``MIN_CLUSTER_SIZE``
-    child facts at level 0.
-    """
-    topic_nodes = graph.get_topic_nodes()
-    logger.info(
-        "--- Consolidation level 1 (%d topic nodes) ---", len(topic_nodes),
-    )
-
-    enriched: list[dict] = []
-    for topic in topic_nodes:
-        children = graph.get_children(topic.id)
-        # Only count fact-level children (level 0).
-        fact_children = [
-            c for c in children
-            if graph.get_node(c).level == 0
-        ]
-
-        if len(fact_children) < MIN_CLUSTER_SIZE:
-            continue
-
-        # Enrich the topic with a summary.
-        try:
-            result = summarize_layer(graph, set(fact_children))
-        except Exception:
-            logger.exception("Summarization failed for topic %s", topic.label)
-            continue
-
-        summary = result.get("summary", "")
-        label = result.get("label", topic.label)
-
-        # Update the topic node's content and label
-        if summary:
-            graph.set_node_attr(topic.id, "content", summary)
-        if label and label != topic.label:
-            graph.set_node_attr(topic.id, "label", label)
-
-        enriched.append({
-            "id": topic.id,
-            "member_ids": fact_children,
-        })
-        logger.info(
-            "Enriched topic %s: %d children", topic.label, len(fact_children),
-        )
-
-    return enriched
 
 
 def _print_dry_run_report(
@@ -403,35 +326,44 @@ def main() -> None:
         print("Graph is empty -- nothing to consolidate.")
         return
 
-    # Snapshot before (only used to compute diff in non-apply mode, but
-    # we capture it here to keep the interface consistent).
+    # Snapshot before (only used to compute diff in non-apply mode).
     _before = snapshot(graph) if not apply_mode else None
 
     if not apply_mode:
         print(f"\n--- DRY RUN (run_id={run_id}) ---")
 
-    # Level 1: enrich topic nodes (topic membership, not embedding clustering).
-    all_abstractions: list[dict] = []
-    level_1_abs = _consolidate_level_1(graph, run_id)
-    all_abstractions.extend(level_1_abs)
+    # Consolidation loop -- level-agnostic, data-driven termination.
+    # Start with the initial working set.
+    initial_layer = _select_working_set(graph, mode, recent_days)
+    if not initial_layer:
+        logger.info("Working set is empty -- nothing to consolidate")
+        return
 
-    # Level 2+: cluster topic/theme abstractions recursively.
-    working_set = [a["id"] for a in level_1_abs]
-    current_level = 2
-    while current_level <= MAX_LEVELS:
-        new_abs = _consolidate_level(
-            graph, working_set, run_id, all_abstractions, current_level,
+    layer = initial_layer
+    all_abstractions: list[dict] = []
+
+    while True:
+        new_abs = _consolidate_layer(
+            graph, layer, run_id, all_abstractions, method="hybrid",
         )
         if not new_abs:
+            logger.info(
+                "Consolidation complete -- no new abstractions at this layer",
+            )
             break
 
         all_abstractions.extend(new_abs)
-        # Next level: cluster the newly created abstractions.
-        working_set = [a["id"] for a in new_abs]
-        current_level += 1
+        # Next layer: the abstractions we just created.
+        layer = [a["id"] for a in new_abs]
 
-    if current_level > MAX_LEVELS:
-        logger.warning("Hit MAX_LEVELS=%d -- hierarchy capped", MAX_LEVELS)
+        # Safety stop only (not a design tier).
+        max_level = max(
+            (graph.get_node(a["id"]).level for a in all_abstractions),
+            default=0,
+        )
+        if max_level >= MAX_LEVELS:
+            logger.warning("Hit MAX_LEVELS=%d -- capping hierarchy", MAX_LEVELS)
+            break
 
     # Report / apply.
     if apply_mode:
