@@ -16,8 +16,8 @@ dist/
 build/
 
 # Runtime
-memory.json
-embeddings.json
+data/memory.json
+data/embeddings.json
 gemory.log
 
 # pyvis auto-downloaded dependencies

@@ -53,7 +53,7 @@ uv run gemory/server.py
 
 After running `uv sync --extra dev` the console script `uv run gemory` also works.
 
-The server loads `memory.json` and `embeddings.json` from the project directory.
+The server loads `memory.json` and `embeddings.json` from the `data/` directory.
 If they don't exist, it starts with an empty graph.
 
 ### HTTP SSE (experimental)
@@ -146,10 +146,10 @@ Call this at the start of a conversation to load context.
 
 ## Data model
 
-The graph is stored as two JSON files:
+The graph is stored as two JSON files under `data/`:
 
-- **`memory.json`** — the graph structure: nodes (facts with content, confidence, provenance timestamps) and edges (weighted relationships with relation types)
-- **`embeddings.json`** — a sidecar mapping node IDs to embedding vectors (kept separate so `memory.json` stays human-readable and diff-friendly)
+- **`data/memory.json`** — the graph structure: nodes (facts with content, confidence, provenance timestamps) and edges (weighted relationships with relation types)
+- **`data/embeddings.json`** — a sidecar mapping node IDs to embedding vectors (kept separate so `memory.json` stays human-readable and diff-friendly)
 
 Both are gitignored — they contain runtime data and potentially sensitive extracted facts.
 
@@ -158,7 +158,7 @@ Both are gitignored — they contain runtime data and potentially sensitive extr
 Render an interactive HTML graph of the stored facts:
 
 ```bash
-uv run python scripts/visualize.py memory.json -o graph.html
+uv run python scripts/visualize.py data/memory.json -o graph.html
 open graph.html
 ```
 
@@ -177,7 +177,7 @@ All 41 deterministic tests use stubbed embeddings — no network or API keys nee
 
 The test harness includes frozen transcript fixtures, controlled vector construction
 via Cholesky decomposition, and a graph snapshot/diff helper for declarative assertions.
-See [TESTING.md](TESTING.md) for the full harness documentation.
+See [TESTING.md](docs/TESTING.md) for the full harness documentation.
 
 Live sanity tests (real API calls, skipped by default):
 
@@ -196,10 +196,15 @@ gemory/
 ├── recall.py       # Query → embed → similarity search → formatted results
 ├── config.py       # Environment-driven constants and thresholds
 ├── models.py       # Node and Edge dataclasses
-├── memory.json     # Human-readable graph (runtime, gitignored)
-└── embeddings.json # Embedding sidecar (runtime, gitignored)
 scripts/
-└── visualize.py    # pyvis interactive graph visualizer
+├── visualize.py    # pyvis interactive graph visualizer
+data/                # Runtime data (gitignored)
+├── memory.json
+└── embeddings.json
+docs/
+├── DREAMER.md       # Dreamer documentation
+├── TESTING.md       # Test harness documentation
+└── instructions/    # Implementation specs
 tests/
 ├── fixtures/       # Frozen transcripts + expectation files
 ├── live/           # Live sanity suite (GEMORY_LIVE=1, manual only)

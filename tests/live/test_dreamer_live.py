@@ -17,7 +17,7 @@ class TestDreamerLive:
     def test_dry_run_on_real_graph(self):
         """Run dreamer --dry-run on the real memory.json and print output."""
         result = subprocess.run(
-            [sys.executable, "dreamer.py", "--dry-run"],
+            [sys.executable, "gemory/dreamer.py", "--dry-run"],
             capture_output=True, text=True, timeout=120,
         )
         print("\n--- Dreamer dry-run output ---")
