@@ -562,3 +562,111 @@ class TestDiffDryRun:
         store, _ = small_graph
         diff = dr._diff_consolidation(store, "test-diff")
         assert isinstance(diff, dict)
+
+
+class TestProfileTheme:
+    """Headline regression: user-profile theme forms from attribute topics,
+    while unrelated project topics stay separate."""
+
+    def test_profile_forms_projects_stay_separate(self, monkeypatch, tmp_path):
+        """Mirror the real graph: 4 unrelated project topics + 3 attribute
+        topics.  Assert: exactly one theme (User profile) forms; no project
+        parent; no misc."""
+        from src import config as cfg
+        from src.graph import GraphStore
+        from src.consolidate import cluster_layer
+        from src.reach import compute_reach, backfill_reach
+
+        store = GraphStore(str(tmp_path / "memory.json"))
+
+        # Create 7 topic nodes -- 4 projects, 3 user attributes.
+        topics: dict[str, str] = {}
+        projects = ["Gemory", "MS Navigator", "Sofia transit", "honcho TUI"]
+        attributes = ["user", "User's VPS", "User's technical preferences"]
+
+        all_names = projects + attributes
+        for i, name in enumerate(all_names):
+            is_project = name in projects
+            tid = store.add_node(
+                content=(
+                    f"{name} project details" if is_project
+                    else f"Facts about the {name}"
+                ),
+                embedding=[float(i + 1), 0.0],
+                provenance={
+                    "source_id": "topic-registry", "label": name, "timestamp": "",
+                },
+                kind="abstraction", label=name,
+                abstraction_kind="topic",
+            )
+            store.set_node_attr(tid, "level", 1)
+            topics[name] = tid
+
+        # Give each topic child facts for reach calculation.
+        for name, tid in topics.items():
+            child_count = (
+                2 if name in attributes else
+                4 if name == "honcho TUI" else
+                15
+            )
+            for c in range(child_count):
+                fid = store.add_node(
+                    content=f"Fact about {name} #{c}",
+                    embedding=[float(c + 1), 0.0],
+                    provenance={"source_id": f"{name}_{c}", "label": "", "timestamp": ""},
+                )
+                store.add_parent_edge(tid, fid)
+                store.set_node_attr(fid, "level", 0)
+
+        # Backfill reach.
+        backfill_reach(store)
+
+        # Verify ground-truth reach.
+        assert compute_reach(store, [topics["honcho TUI"]]) == 4
+        for attr_name in attributes:
+            assert compute_reach(store, [topics[attr_name]]) == 2
+
+        # Stub LLM clusterer: group the 3 attribute topics together.
+        def stub_cluster(summaries):
+            attr_indices = [
+                s["index"] for s in summaries
+                if s.get("label") in attributes
+            ]
+            if attr_indices:
+                return [set(attr_indices)]
+            return []
+
+        monkeypatch.setattr("src.llm.cluster_by_llm", stub_cluster)
+
+        # Stub summarize to return a valid theme.
+        def stub_summarize(contents):
+            return {
+                "label": "User Profile",
+                "summary": "Attributes and characteristics of the user.",
+            }
+
+        monkeypatch.setattr("src.consolidate.summarize_cluster", stub_summarize)
+
+        # Run clustering on the topic layer with LLM method.
+        all_topic_ids = [topics[n] for n in all_names]
+        clusters = cluster_layer(store, all_topic_ids, method="llm")
+
+        # Assert: exactly ONE cluster (the 3 attribute topics grouped).
+        assert len(clusters) == 1, f"Expected 1 cluster, got {len(clusters)}"
+        cluster_members = clusters[0]
+        for attr_name in attributes:
+            assert topics[attr_name] in cluster_members
+
+        # Assert: project topics are NOT in any cluster.
+        for proj_name in projects:
+            for c in clusters:
+                assert topics[proj_name] not in c, (
+                    f"{proj_name} incorrectly clustered"
+                )
+
+        # Assert: combined reach passes MIN_REACH.
+        reach = compute_reach(store, list(cluster_members))
+        assert reach >= cfg.MIN_REACH, (
+            f"Reach {reach} < MIN_REACH {cfg.MIN_REACH}"
+        )
+        assert reach == 6, f"Expected reach 6, got {reach}"

@@ -48,7 +48,7 @@ from src.config import (
 from src.consolidate import cluster_layer, summarize_layer
 from src.graph import GraphStore
 from src.llm import embed
-from src.reach import compute_reach, update_reach
+from src.reach import backfill_reach, compute_reach, update_reach
 from tests.graph_diff import snapshot
 
 
@@ -134,10 +134,24 @@ def _create_abstraction(
     cluster: set[str],
     run_id: str,
     existing_abstractions: list[dict],
+    summary_result: dict[str, str] | None = None,
 ) -> str | None:
     """Create an abstraction node for a cluster, or update an existing one.
 
-    Checks existing abstractions via Jaccard overlap before creating.
+    Parameters
+    ----------
+    graph
+        The graph store.
+    cluster
+        Set of member node IDs.
+    run_id
+        Identifier for this dreamer run.
+    existing_abstractions
+        Previously created abstractions (for overlap checking).
+    summary_result
+        Pre-computed ``{label, summary}`` dict.  When provided the
+        ``summarize_layer`` call is skipped (caller already checked).
+
     Returns the abstraction node ID, or ``None`` if no creation was needed.
     """
     member_ids = list(cluster)
@@ -167,11 +181,14 @@ def _create_abstraction(
             return abs_id
 
     # Create new abstraction.
-    try:
-        result = summarize_layer(graph, cluster)
-    except Exception:
-        logger.exception("Summarization failed for cluster of %d facts", len(cluster))
-        return None
+    if summary_result:
+        result = summary_result
+    else:
+        try:
+            result = summarize_layer(graph, cluster)
+        except Exception:
+            logger.exception("Summarization failed for cluster of %d facts", len(cluster))
+            return None
 
     label = result.get("label", "Unlabeled cluster")
     summary = result.get("summary", "No summary available")
@@ -245,8 +262,28 @@ def _consolidate_layer(
             )
             continue
 
+        # Pre-check: summarize the cluster and veto non-theme results.
+        try:
+            summary_result = summarize_layer(graph, cluster)
+        except Exception:
+            logger.exception("Summarization failed for cluster, skipping")
+            continue
+
+        summary_text = summary_result.get("summary", "").lower()
+        veto_phrases = [
+            "no common theme", "no strong theme", "miscellaneous facts",
+            "no clear theme", "unrelated",
+        ]
+        if any(phrase in summary_text for phrase in veto_phrases):
+            logger.info(
+                "Vetoing cluster: summarizer produced non-theme result (%r)",
+                summary_text[:80],
+            )
+            continue
+
         abs_id = _create_abstraction(
             graph, cluster, run_id, existing_abstractions,
+            summary_result=summary_result,
         )
         if abs_id:
             update_reach(graph, abs_id)
@@ -263,11 +300,48 @@ def _run_consolidation_pass(
 ) -> list[dict]:
     """Run one full consolidation pass with the given method.
 
+    The first layer is the **topic layer** -- we do NOT re-cluster raw
+    facts.  Topics and their fact children are the given level-1 structure.
+
     Returns a list of ``{id, member_ids}`` dicts for each abstraction
     created.  Does **not** save to disk.
     """
-    all_node_ids = [n.id for n in graph.all_nodes()]
-    layer = all_node_ids
+    # Backfill reach on all abstraction nodes before starting.
+    backfilled = backfill_reach(graph)
+    if backfilled:
+        logger.info("Backfilled reach on %d abstraction nodes", backfilled)
+
+    # Start from the topic layer (level-1 abstractions).
+    topic_nodes = graph.get_topic_nodes()
+    if topic_nodes:
+        # Enrich topics first (write summaries from child facts).
+        for topic in topic_nodes:
+            children = graph.get_children(topic.id)
+            if children:
+                try:
+                    result = summarize_layer(graph, set(children))
+                    summary = result.get("summary", "")
+                    label = result.get("label", topic.label)
+                    if summary and summary != topic.content:
+                        graph.set_node_attr(topic.id, "content", summary)
+                    if label and label != topic.label:
+                        graph.set_node_attr(topic.id, "label", label)
+                    r = compute_reach(graph, [topic.id])
+                    graph.set_node_attr(topic.id, "reach", r)
+                    logger.info(
+                        "Enriched topic %s: reach=%d, %d children",
+                        topic.label, r, len(children),
+                    )
+                except Exception:
+                    logger.exception("Failed to enrich topic %s", topic.label)
+
+        layer = [t.id for t in topic_nodes]
+    else:
+        # No topics -- fall back to fact level.
+        logger.warning("No topic nodes found -- starting from facts")
+        all_node_ids = [n.id for n in graph.all_nodes()]
+        layer = all_node_ids
+
     all_abstractions: list[dict] = []
 
     while True:
