@@ -182,6 +182,51 @@ class TestGetChildren:
 # set_node_attr
 # ---------------------------------------------------------------------------
 
+class TestReachField:
+    """``reach`` field on Node."""
+
+    def test_add_node_with_reach(self, empty_graph) -> None:
+        nid = empty_graph.add_node(
+            "abstraction", [0.1, 0.2], {"source_id": "s1"},
+            kind="abstraction", reach=5,
+        )
+        node = empty_graph.get_node(nid)
+        assert node.reach == 5
+
+    def test_add_node_defaults_reach(self, empty_graph) -> None:
+        nid = empty_graph.add_node("fact", [0.1, 0.2], {"source_id": "s1"})
+        node = empty_graph.get_node(nid)
+        assert node.reach == 0
+
+    def test_load_migrates_missing_reach(self, tmp_path) -> None:
+        from src.config import EMBEDDINGS_PATH
+        mem_path = str(tmp_path / "memory.json")
+
+        # Old JSON data without reach field.
+        old_data = {
+            "directed": True, "multigraph": False, "graph": {},
+            "nodes": [
+                {
+                    "id": "n1", "content": "no reach", "confidence": 1.0,
+                    "provenance": [{"source_id": "s1"}],
+                    "created_at": "", "updated_at": "", "level": 0,
+                    "kind": "fact", "label": "", "abstraction_kind": "",
+                },
+            ],
+            "edges": [],
+        }
+        with open(mem_path, "w") as f:
+            json.dump(old_data, f)
+        emb_path = os.path.join(tmp_path, EMBEDDINGS_PATH)
+        with open(emb_path, "w") as f:
+            json.dump({"n1": [0.1, 0.2]}, f)
+
+        graph = GraphStore(mem_path)
+        graph.load()
+        node = graph.get_node("n1")
+        assert node.reach == 0
+
+
 class TestSetNodeAttr:
     def test_set_node_attr(self, empty_graph) -> None:
         nid = empty_graph.add_node("test", [0.1, 0.2], {"source_id": "s1"})
