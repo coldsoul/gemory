@@ -19,51 +19,74 @@ from src import config
 # Extraction prompt
 # ---------------------------------------------------------------------------
 
+_MAX_TOPICS = str(config.MAX_TOPICS_PER_FACT)
+
 _EXTRACTION_PROMPT = (
     "You are a fact extractor for a long-term memory system. You are given a\n"
-    "transcript of a conversation between a user and an assistant. Your job is to\n"
-    "extract durable, atomic facts worth remembering about the user and their world.\n"
+    "transcript of a conversation between a user and an assistant. Extract durable,\n"
+    "atomic facts worth remembering, and assign each fact to the subject(s) it is\n"
+    "about.\n"
     "\n"
-    "Output ONLY a JSON array of objects. No prose, no explanation, no markdown code\n"
-    "fences. If there are no facts worth storing, output [].\n"
+    'Output ONLY a JSON array of objects, each {"fact": "...", "topics": ["..."]}.\n'
+    "No prose, no explanation, no markdown code fences. If there are no facts worth\n"
+    "storing, output [].\n"
     "\n"
-    "Each object must have exactly two keys: \"fact\" and \"topic\".\n"
-    "- \"fact\": the atomic fact statement (see rules below).\n"
-    "- \"topic\": a short (2-5 word) noun phrase naming the SUBJECT the fact is\n"
-    "  about -- the project, entity, or area -- not a restatement of the fact.\n"
-    "  Good: fact \"The user implemented the testing harness for their memory system\"\n"
-    "        -> topic \"Gemory memory system\".\n"
-    "  Use the SAME topic phrase for all facts about the same subject within this\n"
-    "  conversation (be consistent). Prefer a concrete project/entity name if one\n"
-    "  is present (e.g. \"Gemory\", \"Sofia transit tracker\").\n"
-    "  If a fact does not clearly belong to any subject, use an EMPTY topic (\"\").\n"
-    "  Do not force one. The topic must be supported by the conversation; do NOT\n"
-    "  invent a subject not present.\n"
+    "WHAT TO EXTRACT (unchanged rules):\n"
+    "- Durable facts: preferences, background, ongoing projects, relationships, goals,\n"
+    "  constraints, decisions, stable properties of things in the user's world.\n"
+    "- NOT transient/conversational content: greetings, the assistant's suggestions,\n"
+    "  questions, one-off task chatter.\n"
+    "- Facts about the user and their world, not about the assistant.\n"
     "\n"
-    "Rules for what to extract:\n"
-    "- Extract DURABLE facts: things likely to remain true and be useful in future\n"
-    "  conversations (preferences, background, ongoing projects, relationships,\n"
-    "  goals, constraints, decisions, stable opinions).\n"
-    "- Do NOT extract transient or conversational content: greetings, the assistant's\n"
-    "  suggestions, questions, one-off task details, or anything that only matters\n"
-    "  within this single conversation.\n"
-    "- Extract facts about the USER and their world, not about the assistant.\n"
+    "HOW TO WRITE EACH FACT (unchanged rules):\n"
+    "- ATOMIC: exactly one claim. Never join claims with \"and\".\n"
+    "- SELF-CONTAINED: makes sense months later with no access to this conversation;\n"
+    "  resolve pronouns and vague references to concrete nouns.\n"
+    "- Present-tense, complete statement.\n"
+    '- Refer to the user consistently (e.g. "The user ..."). Do not use their name\n'
+    "  unless the name itself is the fact.\n"
+    "- State only what the transcript supports. Do not infer or speculate.\n"
     "\n"
-    "Rules for HOW to write each fact (this is the most important part):\n"
-    "- Each fact must be ATOMIC: exactly one claim. Never combine claims with \"and\".\n"
-    '  Bad:  "The user uses uv and works on a VPS and likes bonsai"\n'
-    '  Good: "The user uses uv"\n'
-    '        "The user works on a VPS"\n'
-    '        "The user likes bonsai"\n'
-    "- Each fact must be SELF-CONTAINED: it must make sense on its own, months later,\n"
-    "  with no access to this conversation. Resolve pronouns and vague references to\n"
-    "  concrete nouns.\n"
-    '  Bad:  "He wants to build it in Python"\n'
-    '  Good: "The user wants to build the memory system in Python"\n'
-    "- Write each fact as a complete, present-tense statement.\n"
-    "- State only what the transcript supports. Do not infer, speculate, or embellish.\n"
+    "HOW TO ASSIGN THE TOPIC(S) - the subject the fact is really about:\n"
+    "- The topic is the PRIMARY ENTITY the fact is genuinely about: a project, a\n"
+    "  person, a physical object, a place, an organisation, an activity - whatever it\n"
+    "  actually concerns.\n"
+    '- IGNORE the grammatical subject. Almost every fact is phrased "The user ...", so\n'
+    '  "starts with the user" does NOT mean the fact is about the user. Look past the\n'
+    "  phrasing to the real subject.\n"
+    "- TEST: the real subject is the thing the fact stays about if everything else\n"
+    "  changed.\n"
+    '    * "The user uses systemd-run to run the collector"  -> the PROJECT the\n'
+    "      collector belongs to (kill the project and the fact is meaningless). NOT\n"
+    "      the user.\n"
+    '    * "The cypress is on the south-facing balcony"  -> the CYPRESS (move\n'
+    "      apartments, still a fact about the tree). NOT the user, NOT a project.\n"
+    '    * "The user has Multiple Sclerosis"  -> the USER (true about the person\n'
+    "      regardless of any project).\n"
+    "- PERSON BUCKET: facts that are durably true about the PERSON across all their\n"
+    "  work - who they are, where they're based, standing cross-project preferences -\n"
+    '  all share ONE topic: "user profile". Do NOT split these into "user\'s health",\n'
+    '  "user\'s location", etc.\n'
+    '    * Joins "user profile" ONLY if true about the person independent of any\n'
+    "      project or object.\n"
+    '    * "Prefers minimal, inspectable implementations" -> user profile.\n'
+    '    * "Uses systemd-run" -> the project, NOT user profile.\n'
+    "      The person bucket is not a catch-all for anything phrased \"The user ...\".\n"
     "\n"
-    'Output format: [{"fact": "fact one", "topic": "topic name"}, ...]'
+    "MULTIPLE TOPICS - the exception, not the default:\n"
+    "- Give exactly ONE topic unless the fact is substantively about a SECOND subject\n"
+    "  such that leaving it out would lose real information.\n"
+    '- "Relatable to" is not enough - it must genuinely BELONG to both.\n'
+    f"- At most {_MAX_TOPICS} topics. Prefer one. The first topic is the primary subject.\n"
+    "- Only co-equal (peer) subjects. Do not add a topic to express a relationship\n"
+    "  between subjects.\n"
+    "\n"
+    "CONSISTENCY: use the SAME topic phrase for the same subject across all facts in\n"
+    "this conversation, so the same project/person/object is not named two different\n"
+    "ways.\n"
+    "\n"
+    'Output format: [{"fact": "...", "topics": ["primary subject"]},\n'
+    '                 {"fact": "...", "topics": ["primary subject", "second subject"]}]'
 )
 
 
@@ -71,11 +94,12 @@ _EXTRACTION_PROMPT = (
 # Parsing helpers
 # ---------------------------------------------------------------------------
 
-def _parse_extraction_response(content: str) -> list[dict[str, str]]:
-    """Parse a JSON array of ``{fact, topic}`` objects from the LLM response.
+def _parse_extraction_response(content: str) -> list[dict]:
+    """Parse a JSON array of ``{fact, topics}`` objects from the LLM response.
 
-    Backward-compatible: if the model returns a plain array of strings,
-    each string is wrapped into ``{"fact": s, "topic": ""}``.
+    Backward-compatible:
+    - Old ``{"fact": "...", "topic": "..."}`` -> ``{"fact": "...", "topics": [...]}``.
+    - Plain strings -> ``{"fact": s, "topics": []}``.
 
     Strategy
     --------
@@ -84,17 +108,27 @@ def _parse_extraction_response(content: str) -> list[dict[str, str]]:
        pair, then try ``json.loads`` on that substring.
     3. If all attempts fail, raise :class:`ValueError` with the raw content.
     """
+    max_topics = config.MAX_TOPICS_PER_FACT
 
     def _normalize(item):
-        """Convert a single parsed item to {fact, topic} format."""
+        """Convert a single parsed item to {fact, topics} format."""
         if isinstance(item, str):
-            return {"fact": item, "topic": ""}
+            return {"fact": item, "topics": []}
         if isinstance(item, dict):
-            return {
-                "fact": str(item.get("fact", "")),
-                "topic": str(item.get("topic", "")),
-            }
-        return {"fact": str(item), "topic": ""}
+            fact = str(item.get("fact", ""))
+            topics_raw = item.get("topics", [])
+            # Backward compat: old single-topic format.
+            if not topics_raw and "topic" in item:
+                t = item["topic"]
+                topics_raw = [t] if t else []
+            # Ensure it is a list.
+            if not isinstance(topics_raw, list):
+                topics_raw = [str(topics_raw)]
+            # Strip empties and cap.
+            topics = [str(t).strip() for t in topics_raw if t and str(t).strip()]
+            topics = topics[:max_topics]
+            return {"fact": fact, "topics": topics}
+        return {"fact": str(item), "topics": []}
 
     # ── Attempt 1: direct JSON parse ──────────────────────────────────
     try:
@@ -131,7 +165,7 @@ def _parse_extraction_response(content: str) -> list[dict[str, str]]:
         content[:500],
     )
     raise ValueError(
-        "Could not parse LLM response as a JSON array of {fact, topic} objects.\n"
+        "Could not parse LLM response as a JSON array of {fact, topics} objects.\n"
         f"Raw response:\n{content}"
     )
 
@@ -140,10 +174,10 @@ def _parse_extraction_response(content: str) -> list[dict[str, str]]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def extract_facts(transcript: str) -> list[dict[str, str]]:
+def extract_facts(transcript: str) -> list[dict]:
     """Extract atomic, durable facts from a conversation *transcript*.
 
-    Returns a list of dicts with keys ``"fact"`` and ``"topic"``.
+    Returns a list of dicts with keys ``"fact"`` and ``"topics"`` (a list).
     Raises :class:`ValueError` if the LLM response cannot be parsed.
 
     Raises
@@ -202,7 +236,7 @@ def extract_facts(transcript: str) -> list[dict[str, str]]:
         )
 
     facts = _parse_extraction_response(raw)
-    topics_count = sum(1 for f in facts if f.get("topic"))
+    topics_count = sum(1 for f in facts if f.get("topics"))
     logger.info("Extracted %d facts (%d with topics)", len(facts), topics_count)
     return facts
 

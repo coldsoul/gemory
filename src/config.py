@@ -116,3 +116,12 @@ TOPIC_MATCH_THRESHOLD: float = float(os.getenv("TOPIC_MATCH_THRESHOLD", "0.85"))
 # Replaces MIN_CLUSTER_SIZE as the single, level-invariant size gate.
 # A child-count threshold is secretly level-specific; reach is not.
 MIN_REACH: int = int(os.getenv("MIN_REACH", "5"))
+
+
+# ---------------------------------------------------------------------------
+# Multi-membership
+# ---------------------------------------------------------------------------
+
+# Hard cap on topics per fact returned by the extractor.
+# Multi-membership is the exception, not the default -- prefer 1.
+MAX_TOPICS_PER_FACT: int = int(os.getenv("MAX_TOPICS_PER_FACT", "2"))

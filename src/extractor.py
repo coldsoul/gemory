@@ -144,15 +144,15 @@ def compute_source_id(transcript: str) -> str:
 
 
 def store_facts(
-    facts: list[dict[str, str]],
+    facts: list[dict],
     source_id: str,
     label: str | None,
     graph: GraphStore,
 ) -> dict[str, int]:
     """Embed, deduplicate, and store *facts* into *graph*.
 
-    Each element of *facts* is ``{"fact": "...", "topic": "..."}`` where
-    ``"topic"`` is optional (defaults to ``""``).
+    Each element of *facts* is ``{"fact": "...", "topics": [...]}`` where
+    ``"topics"`` is optional (defaults to ``[]``).
 
     Steps for each fact
     -------------------
@@ -166,8 +166,8 @@ def store_facts(
     Parameters
     ----------
     facts
-        List of dicts with keys ``"fact"`` (required) and ``"topic"`` (optional),
-        as returned by :func:`src.llm.extract_facts`.
+        List of dicts with keys ``"fact"`` (required) and ``"topics"`` (optional,
+        list of strings), as returned by :func:`src.llm.extract_facts`.
     source_id
         Stable source identifier (e.g. from :func:`compute_source_id`).
     label
@@ -178,7 +178,8 @@ def store_facts(
     Returns
     -------
     dict
-        ``{"facts_extracted": int, "new_nodes": int, "corroborated": int, "skipped": int}``
+        ``{"facts_extracted": int, "new_nodes": int, "corroborated": int,
+            "skipped": int, "topics_linked": int}``
     """
     logger.info("Storing %d facts with source_id=%s", len(facts), source_id)
 
@@ -193,10 +194,14 @@ def store_facts(
 
     for fact_item in facts:
         fact_text = fact_item["fact"]
-        topic_text = fact_item.get("topic", "")
+        topic_texts = fact_item.get("topics", [])
+        # Backward compat: old single "topic" string.
+        if not topic_texts and "topic" in fact_item:
+            t = fact_item["topic"]
+            topic_texts = [t] if t else []
 
-        if topic_text:
-            logger.info("Fact topic: %r", topic_text)
+        if topic_texts:
+            logger.info("Fact topics: %r", topic_texts)
 
         embedding = llm.embed(fact_text)
         provenance = {
@@ -238,17 +243,18 @@ def store_facts(
                     )
 
         # Topic linking (for both new and corroborated facts)
-        if topic_text and topic_text.strip():
-            topic_id = resolve_topic(graph, topic_text.strip())
-            if topic_id:
-                parents = graph.get_parents(node_id)
-                if topic_id not in parents:
-                    graph.add_parent_edge(topic_id, node_id)
-                    counts["topics_linked"] += 1
-                    logger.info(
-                        "Linked fact %s to topic %s",
-                        node_id[:8], topic_id[:8],
-                    )
+        for topic_text in topic_texts:
+            if topic_text and topic_text.strip():
+                topic_id = resolve_topic(graph, topic_text.strip())
+                if topic_id:
+                    parents = graph.get_parents(node_id)
+                    if topic_id not in parents:
+                        graph.add_parent_edge(topic_id, node_id)
+                        counts["topics_linked"] += 1
+                        logger.info(
+                            "Linked fact %s to topic %s",
+                            node_id[:8], topic_id[:8],
+                        )
 
     graph.save()
     logger.info(
