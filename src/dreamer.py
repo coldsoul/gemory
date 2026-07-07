@@ -35,9 +35,9 @@ from src.config import (
     MEMORY_PATH,
     MIN_CLUSTER_SIZE,
 )
-from src.cluster import cluster_nodes
+from src.consolidate import cluster_layer, summarize_layer
 from src.graph import GraphStore
-from src.llm import embed, summarize_cluster
+from src.llm import embed
 from tests.graph_diff import snapshot
 
 
@@ -171,7 +171,7 @@ def _create_abstraction(
 
     # Create new abstraction.
     try:
-        result = summarize_cluster(member_facts)
+        result = summarize_layer(graph, cluster)
     except Exception:
         logger.exception("Summarization failed for cluster of %d facts", len(cluster))
         return None
@@ -250,7 +250,7 @@ def _consolidate_level(
 
     logger.info("--- Consolidation level %d (%d nodes) ---", level, len(node_ids))
 
-    clusters = cluster_nodes(graph, node_ids)
+    clusters = cluster_layer(graph, node_ids)
     if not clusters:
         logger.info("No qualifying clusters at level %d, stopping", level)
         return []
@@ -299,9 +299,8 @@ def _consolidate_level_1(
             continue
 
         # Enrich the topic with a summary.
-        child_facts = [graph.get_node(c).content for c in fact_children]
         try:
-            result = summarize_cluster(child_facts)
+            result = summarize_layer(graph, set(fact_children))
         except Exception:
             logger.exception("Summarization failed for topic %s", topic.label)
             continue
