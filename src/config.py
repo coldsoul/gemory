@@ -92,9 +92,10 @@ MAX_CLUSTER_SIZE: int = int(os.getenv("MAX_CLUSTER_SIZE", "12"))
 # a parallel duplicate.
 ABSTRACTION_OVERLAP: float = float(os.getenv("ABSTRACTION_OVERLAP", "0.8"))
 
-# Safety cap on recursion depth — stop if the hierarchy reaches this many
-# levels. Report if hit so a human can decide whether to increase.
-MAX_LEVELS: int = int(os.getenv("MAX_LEVELS", "6"))
+# Safety cap on recursion depth (data-driven termination, not a design tier).
+# The loop stops naturally when a layer produces no new abstractions;
+# this is a hard stop to prevent runaway recursion.
+MAX_LEVELS: int = int(os.getenv("MAX_LEVELS", "10"))
 
 
 # ---------------------------------------------------------------------------
