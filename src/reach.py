@@ -45,3 +45,18 @@ def update_reach(graph: GraphStore, abstraction_id: str) -> int:
     r = compute_reach(graph, children)
     graph.set_node_attr(abstraction_id, "reach", r)
     return r
+
+
+def backfill_reach(graph: GraphStore) -> int:
+    """Recompute reach for all topic and abstraction nodes.
+
+    Returns the number of nodes updated.
+    """
+    updated = 0
+    for node in graph.all_nodes():
+        if node.kind == "abstraction":
+            r = compute_reach(graph, [node.id])
+            if node.reach != r:
+                graph.set_node_attr(node.id, "reach", r)
+                updated += 1
+    return updated
