@@ -7,7 +7,6 @@ Summarizing receives children content (compound-upward).
 import logging
 from dataclasses import dataclass
 
-from src.cluster import cluster_nodes
 from src.graph import GraphStore
 from src.llm import summarize_cluster
 from src.reach import compute_reach
@@ -27,24 +26,117 @@ class NodeGestalt:
 def cluster_layer(
     graph: GraphStore,
     node_ids: list[str],
+    method: str = "algorithm",
     seed: int = 42,
 ) -> list[set[str]]:
-    """Cluster *node_ids* using their gestalt (label + summary).
+    """Cluster *node_ids* into groups.
 
-    This is the clustering input contract: clustering sees
-    labels+summaries, NOT full transitive facts.
+    Parameters
+    ----------
+    graph
+        The graph store.
+    node_ids
+        Node IDs to cluster.
+    method
+        ``"algorithm"`` (cosine via Louvain), ``"llm"`` (LLM-based grouping on
+        labels+summaries), or ``"hybrid"`` (algorithm first, then LLM on
+        leftovers).
+    seed
+        Random seed for deterministic algorithm clustering.
 
-    Returns clusters as sets of node IDs.
+    Returns
+    -------
+    list[set[str]]
+        List of clusters, each a set of node IDs.
     """
-    # Build gestalt for each node (for logging/audit, not for embedding —
-    # the embedding was already stored with label+summary at creation time).
-    for nid in node_ids:
+    if len(node_ids) < 2:
+        return []
+
+    # Build gestalt for all nodes (needed by LLM and hybrid methods).
+    id_list = list(node_ids)
+    gestalts: list[dict] = []
+    for nid in id_list:
         node = graph.get_node(nid)
         label = node.label or node.content[:50]
-        _gestalt = NodeGestalt(node_id=nid, label=label, summary=node.content)
+        summary = node.content
+        gestalts.append({
+            "index": len(gestalts),
+            "id": nid,
+            "label": label,
+            "summary": summary,
+        })
 
-    # Delegate to the existing Louvain-based clusterer.
+    if method == "algorithm":
+        return _cluster_algorithm(graph, id_list, seed)
+
+    elif method == "llm":
+        return _cluster_llm(gestalts, id_list)
+
+    elif method == "hybrid":
+        # Run algorithm first.
+        algo_clusters = _cluster_algorithm(graph, id_list, seed)
+        algo_ids: set[str] = set()
+        for c in algo_clusters:
+            algo_ids.update(c)
+
+        leftover_ids = [nid for nid in id_list if nid not in algo_ids]
+        if not leftover_ids or len(leftover_ids) < 2:
+            return algo_clusters
+
+        # Filter gestalts to leftovers only and re-index.
+        leftover_gestalts = [g for g in gestalts if g["id"] in leftover_ids]
+        for i, g in enumerate(leftover_gestalts):
+            g["index"] = i
+
+        llm_clusters = _cluster_llm(leftover_gestalts, leftover_ids)
+        return algo_clusters + llm_clusters
+
+    else:
+        raise ValueError(f"Unknown clustering method: {method}")
+
+
+def _cluster_algorithm(
+    graph: GraphStore,
+    node_ids: list[str],
+    seed: int,
+) -> list[set[str]]:
+    """Cosine-based clustering over node embeddings (existing Louvain logic)."""
+    from src.cluster import cluster_nodes
     return cluster_nodes(graph, node_ids, seed=seed)
+
+
+def _cluster_llm(
+    gestalts: list[dict],
+    id_list: list[str],
+) -> list[set[str]]:
+    """LLM-based clustering over labels+summaries."""
+    from src.llm import cluster_by_llm
+
+    if not gestalts:
+        return []
+
+    # Map indices back to node IDs.
+    idx_to_id: dict[int, str] = {g["index"]: g["id"] for g in gestalts}
+
+    llm_input = [
+        {"index": g["index"], "label": g["label"], "summary": g["summary"]}
+        for g in gestalts
+    ]
+
+    try:
+        raw_clusters = cluster_by_llm(llm_input)
+    except Exception:
+        logger.exception("LLM clustering failed, returning no clusters")
+        return []
+
+    # Map indices back to node IDs.
+    result: list[set[str]] = []
+    for cluster in raw_clusters:
+        mapped = {idx_to_id[idx] for idx in cluster if idx in idx_to_id}
+        if len(mapped) >= 2:
+            result.append(mapped)
+
+    return result
 
 
 def summarize_layer(

@@ -371,3 +371,127 @@ def _parse_summarize_response(content: str) -> dict[str, str]:
         f"Could not parse LLM response as a JSON object with label+summary.\n"
         f"Raw response:\n{content}"
     )
+
+
+# ---------------------------------------------------------------------------
+# LLM clustering
+# ---------------------------------------------------------------------------
+
+def cluster_by_llm(node_summaries: list[dict[str, str]]) -> list[set[int]]:
+    """Ask the LLM to group nodes into thematic clusters.
+
+    *node_summaries* is a list of dicts with keys:
+      - ``"index"``: integer position (0-based, for output mapping)
+      - ``"label"``: short label of the node
+      - ``"summary"``: summary/content of the node
+
+    Returns a list of clusters, each a set of indices into *node_summaries*.
+    Nodes not grouped are not included in any cluster.
+
+    Raises :class:`ValueError` if the LLM response cannot be parsed.
+    """
+    # Build the input string.
+    lines: list[str] = []
+    for item in node_summaries:
+        lines.append(f"{item['index']}: [{item['label']}] {item['summary']}")
+    input_text = "\n".join(lines)
+
+    prompt = (
+        "You are a knowledge organizer. You are given a list of items, each with "
+        "a label and a short summary. Your job is to group items that belong "
+        "together into thematic clusters.\n"
+        "\n"
+        "Output ONLY a JSON array of arrays of integers. Each inner array "
+        "contains the indices of items that form one cluster. Items that do not "
+        "belong to any cluster should not appear in any group.\n"
+        "\n"
+        "Rules:\n"
+        "- Group items that share a common theme, subject, or category.\n"
+        "- Do NOT force items together if they are genuinely unrelated.\n"
+        "- A cluster should have at least 2 items.\n"
+        "- Do not invent themes not supported by the items.\n"
+        "\n"
+        "Example: if items 0, 2, 5 are about coding tools and items 1, 4 are "
+        "about photography, output: [[0, 2, 5], [1, 4]]\n"
+        "\n"
+        "Output format: [[0, 2, 5], [1, 4]]"
+    )
+
+    client = openai.OpenAI(
+        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.DEEPSEEK_API_KEY,
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=config.DEEPSEEK_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": input_text},
+            ],
+        )
+    except Exception:
+        logger.exception("LLM clustering failed")
+        raise
+
+    raw = response.choices[0].message.content
+    usage = response.usage
+    if usage:
+        logger.info(
+            "LLM clustering: tokens(prompt=%d, completion=%d, total=%d) raw=%r",
+            usage.prompt_tokens, usage.completion_tokens, usage.total_tokens,
+            raw if raw else None,
+        )
+    else:
+        logger.info("LLM clustering: raw=%r", raw if raw else None)
+
+    clusters = _parse_cluster_response(raw)
+    logger.info("LLM clustering produced %d groups", len(clusters))
+    return clusters
+
+
+def _parse_cluster_response(content: str) -> list[set[int]]:
+    """Parse LLM cluster response into list of index sets."""
+    import json
+
+    # Attempt 1: direct JSON parse
+    try:
+        data = json.loads(content)
+        return _validate_clusters(data)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Attempt 2: strip fences
+    cleaned = content.strip()
+    if cleaned.startswith("```"):
+        first_nl = cleaned.find("\n")
+        if first_nl != -1:
+            cleaned = cleaned[first_nl + 1:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+
+    try:
+        data = json.loads(cleaned)
+        return _validate_clusters(data)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    logger.error(
+        "Could not parse LLM cluster response. Raw: %s", content[:500],
+    )
+    raise ValueError(
+        "Could not parse LLM cluster response as JSON array of arrays.\n"
+        f"Raw response:\n{content}"
+    )
+
+
+def _validate_clusters(data) -> list[set[int]]:
+    """Validate and convert raw parsed data to list of sets of ints."""
+    if not isinstance(data, list):
+        raise ValueError("Expected a JSON array")
+    result: list[set[int]] = []
+    for item in data:
+        if not isinstance(item, list):
+            raise ValueError("Expected array of arrays")
+        result.append(set(int(i) for i in item))
+    return result
