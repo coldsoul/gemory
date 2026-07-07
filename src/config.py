@@ -17,7 +17,8 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 MEMORY_PATH: str = os.getenv("MEMORY_PATH", "data/memory.json")
-EMBEDDINGS_PATH: str = os.getenv("EMBEDDINGS_PATH", "data/embeddings.json")
+# Embeddings sidecar filename — stored alongside memory.json (directory from MEMORY_PATH)
+EMBEDDINGS_PATH: str = os.getenv("EMBEDDINGS_PATH", "embeddings.json")
 
 # When set, server logs are written to this file in addition to stderr.
 # Useful when the server is run by an MCP client (e.g. Claude Desktop) that
