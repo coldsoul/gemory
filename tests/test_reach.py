@@ -115,3 +115,99 @@ class TestReach:
         # Combined: reach = 6 (>= MIN_REACH=5, worth a theme!)
         assert compute_reach(store, topics) >= config.MIN_REACH
         assert compute_reach(store, topics) == 6
+
+    def test_multi_parent_reach_is_distinct_union(self, tmp_graph_path):
+        """A fact with two topic parents contributes 1 to combined reach, not 2.
+
+        Setup:
+        - 1 fact node (F1)
+        - 2 topic nodes (T1, T2) — both parent_of F1
+        - 1 theme node (Th1) — parent_of both T1 and T2
+
+        Expected: reach(Th1) = 1, reach(T1) = 1, reach(T2) = 1
+        Union reach of {T1, T2} = 1 (not 2)
+        """
+        store = GraphStore(tmp_graph_path)
+
+        # Create fact F1.
+        f1 = store.add_node(
+            content="The user uses systemd-run for the collector.",
+            embedding=[1.0, 0.0],
+            provenance={"source_id": "src1", "label": "", "timestamp": ""},
+        )
+
+        # Create topic T1, parent_of F1.
+        t1 = store.add_node(
+            content="Sofia transit project",
+            embedding=[0.9, 0.1],
+            provenance={
+                "source_id": "topic-registry", "label": "Sofia transit project",
+                "timestamp": "",
+            },
+            kind="abstraction", label="Sofia transit project",
+            abstraction_kind="topic",
+        )
+        store.set_node_attr(t1, "level", 1)
+        store.add_parent_edge(t1, f1)
+
+        # Create topic T2, parent_of F1 (same fact, second parent).
+        t2 = store.add_node(
+            content="user infrastructure knowledge",
+            embedding=[0.8, 0.2],
+            provenance={
+                "source_id": "topic-registry", "label": "user infrastructure knowledge",
+                "timestamp": "",
+            },
+            kind="abstraction", label="user infrastructure knowledge",
+            abstraction_kind="topic",
+        )
+        store.set_node_attr(t2, "level", 1)
+        store.add_parent_edge(t2, f1)
+
+        # Verify individual topic reach.
+        assert compute_reach(store, [t1]) == 1  # one fact child
+        assert compute_reach(store, [t2]) == 1  # same fact
+
+        # VERIFY: union reach of both topics = 1 (not 2!)
+        union_reach = compute_reach(store, [t1, t2])
+        assert union_reach == 1, (
+            f"Multi-parent reach must be distinct union. "
+            f"Expected 1 leaf, got {union_reach}. "
+            f"A naive sum would give 2, which is wrong."
+        )
+
+        # Now add a second fact under T2 only.
+        f2 = store.add_node(
+            content="Another systemd fact.",
+            embedding=[0.5, 0.5],
+            provenance={"source_id": "src2", "label": "", "timestamp": ""},
+        )
+        store.add_parent_edge(t2, f2)
+
+        # T1 still has 1 child (F1), T2 now has 2 (F1, F2).
+        assert compute_reach(store, [t1]) == 1
+        assert compute_reach(store, [t2]) == 2
+
+        # Union of T1+T2 = distinct {F1, F2} = 2.
+        assert compute_reach(store, [t1, t2]) == 2
+
+        # Now create a theme Th1 parent_of both topics.
+        th1 = store.add_node(
+            content="User projects theme",
+            embedding=[0.7, 0.3],
+            provenance={
+                "source_id": "dreamer:test", "label": "Projects", "timestamp": "",
+            },
+            kind="abstraction", label="Projects",
+        )
+        store.set_node_attr(th1, "level", 2)
+        store.add_parent_edge(th1, t1)
+        store.add_parent_edge(th1, t2)
+
+        # Theme reach = distinct facts under both topics = {F1, F2} = 2.
+        # NOT 3 (which would be 1+2 if counting non-distinct).
+        actual = compute_reach(store, [th1])
+        assert actual == 2, (
+            f"Theme reach must be distinct union of all leaf descendants. "
+            f"Expected 2 distinct leaves, got {actual}"
+        )
