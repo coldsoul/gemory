@@ -38,15 +38,16 @@ class TestExtractionQuality:
         print(f"\n--- conv_01 extraction ({len(facts)} facts) ---")
         for i, item in enumerate(facts, 1):
             topics = item.get("topics", [])
-            topic_suffix = f" [topics: {', '.join(topics)}]" if topics else ""
-            print(f"  {i}. {item['fact']}{topic_suffix}")
+            topic_str = ", ".join(topics) if topics else "no topic"
+            print(f"  {i}. [{topic_str}]")
+            print(f"     {item['fact']}")
 
-        print(f"\nExpected ({len(expected['facts'])} facts):")
-        for i, fact in enumerate(expected["facts"], 1):
-            print(f"  {i}. {fact}")
-
-        # Not assertion-strict: the live model may return different wording.
-        print("\nReview atomicity, self-containment, and durable-vs-transient.")
+        multi = [f for f in facts if len(f.get("topics", [])) > 1]
+        single = len(facts) - len(multi)
+        print(f"\nTopics: {single} single-topic, {len(multi)} multi-topic")
+        print("Review: Are topics the TRUE subject (not grammatical subject)?")
+        print("Is 'user profile' used only for durable personal attributes?")
+        print("Are multi-topic assignments substantive (genuine dual-belonging)?")
 
     def test_extract_conv_02(self):
         """Print facts extracted from conv_02.txt."""
@@ -59,11 +60,12 @@ class TestExtractionQuality:
         print(f"\n--- conv_02 extraction ({len(facts)} facts) ---")
         for i, item in enumerate(facts, 1):
             topics = item.get("topics", [])
-            topic_suffix = f" [topics: {', '.join(topics)}]" if topics else ""
-            print(f"  {i}. {item['fact']}{topic_suffix}")
+            topic_str = ", ".join(topics) if topics else "no topic"
+            print(f"  {i}. [{topic_str}]")
+            print(f"     {item['fact']}")
 
-        print(f"\nExpected ({len(expected['facts'])} facts):")
-        for i, fact in enumerate(expected["facts"], 1):
-            print(f"  {i}. {fact}")
-
-        print("\nCheck that corroboration pairs are recognized.")
+        multi = [f for f in facts if len(f.get("topics", [])) > 1]
+        single = len(facts) - len(multi)
+        print(f"\nTopics: {single} single-topic, {len(multi)} multi-topic")
+        print("Spot-check: are multi-topic facts rare (the exception)?")
+        print("Check that corroboration pairs are recognized.")
