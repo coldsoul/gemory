@@ -132,6 +132,9 @@ class GraphStore:
             if "abstraction_kind" not in attrs:
                 attrs["abstraction_kind"] = ""
                 migrated += 1
+            if "reach" not in attrs:
+                attrs["reach"] = 0
+                migrated += 1
         if migrated:
             logger.info(
                 "Migrated %d nodes missing schema fields", migrated,
@@ -178,6 +181,7 @@ class GraphStore:
         kind: str = "fact",
         label: str = "",
         abstraction_kind: str = "",
+        reach: int = 0,
     ) -> str:
         """Create a new node in the graph.
 
@@ -196,6 +200,8 @@ class GraphStore:
         abstraction_kind
             ``""`` (not an abstraction), ``"topic"`` (level-1 topic), or
             ``"theme"`` (dreamer-created higher-level).
+        reach
+            Transitive leaf count; 0 for facts, computed for abstractions.
 
         Returns the auto-generated UUID4 node id.
         """
@@ -212,6 +218,7 @@ class GraphStore:
             kind=kind,
             label=label,
             abstraction_kind=abstraction_kind,
+            reach=reach,
         )
         self._embeddings[node_id] = embedding
         logger.info(

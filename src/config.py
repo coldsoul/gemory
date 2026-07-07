@@ -105,3 +105,13 @@ MAX_LEVELS: int = int(os.getenv("MAX_LEVELS", "6"))
 # topic nodes. Set high (0.80-0.85) because topic strings are short and
 # subject-focused — genuine same-topic phrasings score high.
 TOPIC_MATCH_THRESHOLD: float = float(os.getenv("TOPIC_MATCH_THRESHOLD", "0.85"))
+
+
+# ---------------------------------------------------------------------------
+# Reach / size gate
+# ---------------------------------------------------------------------------
+
+# Smallest transitive leaf count worth creating an abstraction for.
+# Replaces MIN_CLUSTER_SIZE as the single, level-invariant size gate.
+# A child-count threshold is secretly level-specific; reach is not.
+MIN_REACH: int = int(os.getenv("MIN_REACH", "5"))
