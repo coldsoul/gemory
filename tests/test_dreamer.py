@@ -115,7 +115,7 @@ class TestBasicAbstraction:
             {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
             dim=3,
         )
-        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr("src.consolidate.summarize_cluster", _stub_summarize())
         monkeypatch.setattr(dr, "embed", stub_embed.embed)
 
         # Run consolidation
@@ -154,7 +154,7 @@ class TestMinSizeRespected:
         from src import dreamer as dr
 
         stub = LookupStub({}, dim=3)
-        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr("src.consolidate.summarize_cluster", _stub_summarize())
         monkeypatch.setattr(dr, "embed", stub.embed)
 
         abstractions = dr._consolidate_level(store, all_ids, "test-run", [], 1)
@@ -174,7 +174,7 @@ class TestConsolidationIdempotency:
             {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
             dim=3,
         )
-        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr("src.consolidate.summarize_cluster", _stub_summarize())
         monkeypatch.setattr(dr, "embed", stub_embed.embed)
 
         # First run
@@ -206,7 +206,7 @@ class TestAbstractionProvenance:
             {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
             dim=3,
         )
-        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr("src.consolidate.summarize_cluster", _stub_summarize())
         monkeypatch.setattr(dr, "embed", stub_embed.embed)
 
         abstractions = dr._consolidate_level(store, all_ids, "run-abc", [], 1)
@@ -237,7 +237,7 @@ class TestAbstractionLevel:
             {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
             dim=3,
         )
-        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr("src.consolidate.summarize_cluster", _stub_summarize())
         monkeypatch.setattr(dr, "embed", stub_embed.embed)
 
         abstractions = dr._consolidate_level(store, all_ids, "run1", [], 1)
@@ -272,7 +272,7 @@ class TestDryRunWritesNothing:
             {"Test Theme. A test summary.": [1.0, 0.0, 0.0]},
             dim=3,
         )
-        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize())
+        monkeypatch.setattr("src.consolidate.summarize_cluster", _stub_summarize())
         monkeypatch.setattr(dr, "embed", stub_embed.embed)
 
         # Also stub sys.argv for main()
@@ -319,7 +319,7 @@ class TestApplyWritesAndBacksUp:
             {"Auto Theme": [1.0, 0.0, 0.0]},
             dim=3,
         )
-        monkeypatch.setattr(dr, "summarize_cluster", _stub_summarize(
+        monkeypatch.setattr("src.consolidate.summarize_cluster", _stub_summarize(
             label="Auto Theme", summary="Enriched summary.",
         ))
         monkeypatch.setattr(dr, "embed", stub_embed.embed)
@@ -390,7 +390,7 @@ class TestRecursiveConsolidation:
         def mock_summarize(facts):
             return {"label": "Auto Theme", "summary": "Enriched summary."}
 
-        monkeypatch.setattr(dr, "summarize_cluster", mock_summarize)
+        monkeypatch.setattr("src.consolidate.summarize_cluster", mock_summarize)
         monkeypatch.setattr(dr, "embed", lambda x: [1.0, 0.0, 0.0])
 
         # Level 1: enrich topics.
@@ -467,7 +467,7 @@ class TestTopicGroupsFarApartFacts:
             call_log.append(facts_list)
             return {"label": "Auto Theme", "summary": "Enriched summary."}
 
-        monkeypatch.setattr(dr, "summarize_cluster", mock_summarize)
+        monkeypatch.setattr("src.consolidate.summarize_cluster", mock_summarize)
         monkeypatch.setattr(dr, "embed", topic_stub.embed)
 
         # Run level-1 enrichment.
@@ -534,7 +534,7 @@ class TestLevel2ThemeGrouping:
         def mock_summarize(facts):
             return {"label": "Auto Theme", "summary": "Theme summary."}
 
-        monkeypatch.setattr(dr, "summarize_cluster", mock_summarize)
+        monkeypatch.setattr("src.consolidate.summarize_cluster", mock_summarize)
         monkeypatch.setattr(dr, "embed", lambda x: [1.0, 0.0, 0.0])
 
         # Level 1: enrich topics.
@@ -594,7 +594,7 @@ class TestIdempotencyPreservesTopics:
         def mock_summarize(facts):
             return {"label": "Auto Theme", "summary": "Theme summary."}
 
-        monkeypatch.setattr(dr, "summarize_cluster", mock_summarize)
+        monkeypatch.setattr("src.consolidate.summarize_cluster", mock_summarize)
         monkeypatch.setattr(dr, "embed", lambda x: [1.0, 0.0, 0.0])
 
         # First run.
