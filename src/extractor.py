@@ -11,10 +11,10 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from gemory import config
-from gemory import llm
-from gemory.graph import GraphStore
-from gemory.topics import resolve_topic
+from src import config
+from src import llm
+from src.graph import GraphStore
+from src.topics import resolve_topic
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,7 @@ def store_facts(
 
     Steps for each fact
     -------------------
-    1. Embed the fact string via :func:`gemory.llm.embed`.
+    1. Embed the fact string via :func:`src.llm.embed`.
     2. Look up the embedding in the graph at ``DEDUP_THRESHOLD``.
     3. If a match is found → ``bump_confidence`` (corroborate or skip).
     4. Otherwise → ``add_node`` and connect to close-but-distinct neighbours
@@ -167,7 +167,7 @@ def store_facts(
     ----------
     facts
         List of dicts with keys ``"fact"`` (required) and ``"topic"`` (optional),
-        as returned by :func:`gemory.llm.extract_facts`.
+        as returned by :func:`src.llm.extract_facts`.
     source_id
         Stable source identifier (e.g. from :func:`compute_source_id`).
     label

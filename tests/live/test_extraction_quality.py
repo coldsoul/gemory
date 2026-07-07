@@ -29,7 +29,7 @@ class TestExtractionQuality:
 
     def test_extract_conv_01(self):
         """Print facts extracted from conv_01.txt for atomicity review."""
-        import gemory.llm as llm
+        import src.llm as llm
 
         transcript = (FIXTURE_DIR / "conv_01.txt").read_text()
         expected = _load_expected("conv_01")
@@ -50,7 +50,7 @@ class TestExtractionQuality:
 
     def test_extract_conv_02(self):
         """Print facts extracted from conv_02.txt."""
-        import gemory.llm as llm
+        import src.llm as llm
 
         transcript = (FIXTURE_DIR / "conv_02.txt").read_text()
         expected = _load_expected("conv_02")

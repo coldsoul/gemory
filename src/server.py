@@ -14,8 +14,8 @@ import signal
 import sys
 import traceback
 
-# Ensure the project root is on sys.path so `from gemory.*` imports resolve
-# when running this script directly (e.g. `uv run gemory/server.py`).
+# Ensure the project root is on sys.path so `from src.*` imports resolve
+# when running this script directly (e.g. `uv run src/server.py`).
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 
@@ -23,15 +23,15 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
 
-from gemory.config import (
+from src.config import (
     EMBEDDINGS_PATH,
     GEMORY_LOG_FILE as _RAW_GEMORY_LOG_FILE,
     MEMORY_PATH as _RAW_MEMORY_PATH,
 )
-from gemory.graph import GraphStore
-from gemory.llm import extract_facts
-from gemory.extractor import compute_source_id, store_facts
-from gemory.recall import recall
+from src.graph import GraphStore
+from src.llm import extract_facts
+from src.extractor import compute_source_id, store_facts
+from src.recall import recall
 
 # Resolve relative paths against the project root so the server works
 # regardless of what the calling process (e.g. Claude Desktop) sets as cwd.
@@ -58,14 +58,14 @@ if GEMORY_LOG_FILE:
     _fh = logging.FileHandler(GEMORY_LOG_FILE)
     _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
     logging.getLogger().addHandler(_fh)
-    logging.getLogger("gemory.server").info("Logging to %s", GEMORY_LOG_FILE)
-logger = logging.getLogger("gemory.server")
+    logging.getLogger("src.server").info("Logging to %s", GEMORY_LOG_FILE)
+logger = logging.getLogger("src.server")
 
 # ---------------------------------------------------------------------------
 # Server / graph (module-level — initialised once in main())
 # ---------------------------------------------------------------------------
 
-server = Server("gemory")
+server = Server("src")
 graph = GraphStore(MEMORY_PATH)
 
 

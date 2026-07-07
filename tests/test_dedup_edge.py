@@ -6,9 +6,9 @@ Reads DEDUP_THRESHOLD and EDGE_THRESHOLD from config at test time.
 
 import pytest
 
-from gemory import config
-from gemory.extractor import store_facts
-from gemory.graph import GraphStore
+from src import config
+from src.extractor import store_facts
+from src.graph import GraphStore
 from tests.stubs import LookupStub, vectors_with_cosines
 
 
@@ -42,7 +42,7 @@ class TestMergeAboveDedup:
 
         # A and B at similarity 0.95 (well above dedup threshold)
         stub = _build_lookup({("A", "B"): 0.95})
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", stub.embed)
 
         graph = GraphStore(str(tmp_path / "memory.json"))
@@ -69,7 +69,7 @@ class TestEdgeBetweenThresholds:
 
         # A and C at similarity 0.78 (between thresholds for .env config)
         stub = _build_lookup({("A", "C"): 0.78})
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", stub.embed)
 
         graph = GraphStore(str(tmp_path / "memory.json"))
@@ -100,7 +100,7 @@ class TestNoEdgeBelowEdge:
     def test_no_edge_below_edge(self, monkeypatch, tmp_path) -> None:
         # A and D at similarity 0.50 (well below edge threshold)
         stub = _build_lookup({("A", "D"): 0.50})
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", stub.embed)
 
         graph = GraphStore(str(tmp_path / "memory.json"))

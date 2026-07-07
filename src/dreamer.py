@@ -15,8 +15,8 @@ import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 
-# Ensure project root on sys.path so ``from gemory.*`` imports resolve
-# when this script is run directly (e.g. ``uv run gemory/dreamer.py``).
+# Ensure project root on sys.path so ``from src.*`` imports resolve
+# when this script is run directly (e.g. ``uv run src/dreamer.py``).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Configure logging
@@ -27,7 +27,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("dreamer")
 
-from gemory.config import (
+from src.config import (
     ABSTRACTION_OVERLAP,
     CONFIDENCE_BASE,
     MAX_CLUSTER_SIZE,
@@ -35,9 +35,9 @@ from gemory.config import (
     MEMORY_PATH,
     MIN_CLUSTER_SIZE,
 )
-from gemory.cluster import cluster_nodes
-from gemory.graph import GraphStore
-from gemory.llm import embed, summarize_cluster
+from src.cluster import cluster_nodes
+from src.graph import GraphStore
+from src.llm import embed, summarize_cluster
 from tests.graph_diff import snapshot
 
 

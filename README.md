@@ -48,7 +48,7 @@ See `.env.example` for all configurable options (thresholds, model names, paths)
 ### Stdio (default)
 
 ```bash
-uv run gemory/server.py
+uv run src/server.py
 ```
 
 After running `uv sync --extra dev` the console script `uv run gemory` also works.
@@ -59,7 +59,7 @@ If they don't exist, it starts with an empty graph.
 ### HTTP SSE (experimental)
 
 ```bash
-uv run gemory/server.py --http
+uv run src/server.py --http
 ```
 
 Starts on `http://127.0.0.1:8765/sse`.
@@ -78,7 +78,7 @@ In `~/Library/Application Support/Claude/claude_desktop_config.json`:
     "gemory": {
       "command": "/absolute/path/to/gemory/.venv/bin/python",
       "args": [
-        "/absolute/path/to/gemory/gemory/server.py"
+        "/absolute/path/to/gemory/src/server.py"
       ],
       "env": {
         "GEMORY_LOG_FILE": "/absolute/path/to/gemory/gemory.log"
@@ -104,7 +104,7 @@ Note: the `command` path above uses Unix-style absolute paths — adjust for Win
 For clients that support URL-based registration, run the server in HTTP SSE mode:
 
 ```bash
-uv run gemory/server.py --http
+uv run src/server.py --http
 ```
 
 Then configure the client URL to `http://127.0.0.1:8765/sse`.
@@ -188,7 +188,7 @@ GEMORY_LIVE=1 uv run pytest tests/live/ -v -s
 ### Architecture
 
 ```
-gemory/
+src/
 ├── server.py       # MCP server: remember + recall tools (stdio + SSE)
 ├── graph.py        # GraphStore: in-memory DiGraph + JSON persistence
 ├── llm.py          # DeepSeek wrapper: fact extraction + embeddings

@@ -1,10 +1,10 @@
-"""Tests for :mod:`gemory.cluster` — Louvain-based community detection."""
+"""Tests for :mod:`src.cluster` — Louvain-based community detection."""
 
 import numpy as np
 import pytest
 
-from gemory.cluster import cluster_nodes
-from gemory.graph import GraphStore
+from src.cluster import cluster_nodes
+from src.graph import GraphStore
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ class TestClusterFindsTwoClusters:
         assert len(clusters) >= 2
 
         # Each cluster should have at least MIN_CLUSTER_SIZE members.
-        from gemory import config
+        from src import config
         for c in clusters:
             assert len(c) >= config.MIN_CLUSTER_SIZE
 

@@ -6,8 +6,8 @@ import networkx as nx
 import numpy as np
 from networkx.algorithms.community import louvain_communities
 
-from gemory import config
-from gemory.graph import GraphStore
+from src import config
+from src.graph import GraphStore
 
 logger = logging.getLogger(__name__)
 

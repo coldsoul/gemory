@@ -6,9 +6,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from gemory import config
-from gemory.extractor import store_facts
-from gemory.graph import GraphStore
+from src import config
+from src.extractor import store_facts
+from src.graph import GraphStore
 from tests.stubs import vectors_with_cosines
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -60,7 +60,7 @@ class TestCrossSourceCorroboration:
         from tests.stubs import LookupStub
         stub = LookupStub(lookup, dim=n)
 
-        import gemory.extractor as ext_mod
+        import src.extractor as ext_mod
         monkeypatch.setattr(ext_mod.llm, "embed", stub.embed)
 
         graph = GraphStore(str(tmp_path / "memory.json"))

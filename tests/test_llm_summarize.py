@@ -1,4 +1,4 @@
-"""Tests for :func:`gemory.llm.summarize_cluster`.
+"""Tests for :func:`src.llm.summarize_cluster`.
 
 All API calls are mocked -- no real network requests are made.
 """
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from openai import AuthenticationError
 
-from gemory.llm import summarize_cluster
+from src.llm import summarize_cluster
 
 
 # ---------------------------------------------------------------------------
@@ -22,7 +22,7 @@ def _mock_openai(monkeypatch, return_content: str):
     mock_client.chat.completions.create.return_value = MagicMock(
         choices=[MagicMock(message=MagicMock(content=return_content))],
     )
-    monkeypatch.setattr("gemory.llm.openai.OpenAI", lambda **kw: mock_client)
+    monkeypatch.setattr("src.llm.openai.OpenAI", lambda **kw: mock_client)
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ def _mock_openai(monkeypatch, return_content: str):
 # ---------------------------------------------------------------------------
 
 class TestSummarizeCluster:
-    """Tests for :func:`gemory.llm.summarize_cluster`."""
+    """Tests for :func:`src.llm.summarize_cluster`."""
 
     def test_summarize_cluster_returns_dict(self, monkeypatch) -> None:
         """A valid JSON response is parsed into a dict with label and summary."""
@@ -72,7 +72,7 @@ class TestSummarizeCluster:
             response=MagicMock(status_code=401),
             body=None,
         )
-        monkeypatch.setattr("gemory.llm.openai.OpenAI", lambda **kw: mock_client)
+        monkeypatch.setattr("src.llm.openai.OpenAI", lambda **kw: mock_client)
 
         with pytest.raises(AuthenticationError):
             summarize_cluster(["fact"])

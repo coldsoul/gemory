@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from gemory import config
+from src import config
 from tests.stubs import vectors_with_cosines, LookupStub
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"

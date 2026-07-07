@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from gemory.graph import GraphStore
+from src.graph import GraphStore
 
 
 @dataclass

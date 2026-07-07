@@ -6,8 +6,8 @@ similar stored facts, and returns a human-readable summary.
 
 import logging
 
-from gemory import llm
-from gemory.graph import GraphStore
+from src import llm
+from src.graph import GraphStore
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ def recall(query: str, graph: GraphStore, top_k: int = 5) -> str:
 
     Steps
     -----
-    1. Embed the query via :func:`gemory.llm.embed`.
+    1. Embed the query via :func:`src.llm.embed`.
     2. Run similarity search over all stored embeddings (no threshold).
     3. Format the top-``top_k`` results as a readable string.
 

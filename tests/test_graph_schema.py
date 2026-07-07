@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from gemory.graph import GraphStore
+from src.graph import GraphStore
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ class TestLoadOldSchemaDefaults:
         assert t2 in topic_ids
 
     def test_load_old_schema_defaults_kind_label(self, tmp_path) -> None:
-        from gemory.config import EMBEDDINGS_PATH
+        from src.config import EMBEDDINGS_PATH
         mem_path = str(tmp_path / "memory.json")
 
         # Manually write a memory.json WITHOUT kind/label fields.

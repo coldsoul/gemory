@@ -2,7 +2,7 @@
 
 import pytest
 
-from gemory.graph import GraphStore
+from src.graph import GraphStore
 from tests.stubs import HashStub, LookupStub
 
 

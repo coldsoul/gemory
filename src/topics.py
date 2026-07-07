@@ -10,9 +10,9 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from gemory import config
-from gemory.graph import GraphStore
-from gemory.llm import embed
+from src import config
+from src.graph import GraphStore
+from src.llm import embed
 
 logger = logging.getLogger(__name__)
 
