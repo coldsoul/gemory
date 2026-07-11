@@ -31,7 +31,7 @@ from src.config import (
 from src.graph import GraphStore
 from src.llm import extract_facts
 from src.extractor import compute_source_id, store_facts
-from src.recall import recall
+from src.recall import recall, traverse_recall
 
 # Resolve relative paths against the project root so the server works
 # regardless of what the calling process (e.g. Claude Desktop) sets as cwd.
@@ -123,6 +123,15 @@ async def handle_list_tools() -> list[types.Tool]:
                         ),
                         "default": 5,
                     },
+                    "method": {
+                        "type": "string",
+                        "description": (
+                            "Recall method: 'flat' (vector similarity, default) "
+                            "or 'traverse' (hierarchical descent)."
+                        ),
+                        "enum": ["flat", "traverse"],
+                        "default": "flat",
+                    },
                 },
                 "required": ["query"],
             },
@@ -190,14 +199,25 @@ async def _handle_recall(arguments: dict) -> list[types.TextContent]:
     """Search the graph for facts relevant to a query."""
     query = arguments["query"]
     top_k = arguments.get("top_k", 5)
+    method = arguments.get("method", "flat")
 
     logger.info(
-        "Recall called with query (%d chars), top_k=%d", len(query), top_k,
+        "Recall called with query (%d chars), top_k=%d, method=%s",
+        len(query), top_k, method,
     )
 
     try:
-        result = recall(query, graph, top_k)
-        return [types.TextContent(type="text", text=result)]
+        if method == "traverse":
+            result_text, metrics = traverse_recall(query, graph, top_k)
+            logger.info(
+                "Traverse recall: %d layers, %d facts, %d kept/%d pruned",
+                metrics["layers_visited"], metrics["facts_collected"],
+                metrics["branches_kept"], metrics["branches_pruned"],
+            )
+            return [types.TextContent(type="text", text=result_text)]
+        else:
+            result = recall(query, graph, top_k)
+            return [types.TextContent(type="text", text=result)]
 
     except Exception:
         logger.exception("Recall failed")

@@ -134,3 +134,18 @@ MAX_TOPICS_PER_FACT: int = int(os.getenv("MAX_TOPICS_PER_FACT", "2"))
 # Fraction of a category's members that must carry a relation from X
 # before the dreamer lifts it to the category (start strict at 1.0 = all).
 RELATION_LIFT_RATIO: float = float(os.getenv("RELATION_LIFT_RATIO", "1.0"))
+
+
+# ---------------------------------------------------------------------------
+# Traversal recall
+# ---------------------------------------------------------------------------
+
+# Safety cap on how many levels deep traversal recall descends.
+MAX_TRAVERSAL_DEPTH: int = int(os.getenv("MAX_TRAVERSAL_DEPTH", "6"))
+
+# Maximum number of branches kept per pruning decision.
+# If the LLM keeps more than this, take the top by its own ranking.
+MAX_BRANCHES_PER_LEVEL: int = int(os.getenv("MAX_BRANCHES_PER_LEVEL", "3"))
+
+# Maximum number of facts returned by traverse_recall.
+MAX_FACTS_RETURNED: int = int(os.getenv("MAX_FACTS_RETURNED", "30"))

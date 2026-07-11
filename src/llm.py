@@ -657,3 +657,126 @@ def _validate_clusters(data) -> list[set[int]]:
             raise ValueError("Expected array of arrays")
         result.append(set(int(i) for i in item))
     return result
+
+
+# ---------------------------------------------------------------------------
+# Pruning (traversal recall)
+# ---------------------------------------------------------------------------
+
+def prune_branches(query: str, candidates: list[dict]) -> list[str]:
+    """Ask the LLM which candidate branches could contain information relevant
+    to *query*.  Returns the ids of the kept branches.
+
+    Each candidate dict has keys: ``"id"``, ``"label"``, ``"summary"``,
+    ``"reach"``.
+
+    Raises :class:`ValueError` if the LLM response cannot be parsed.
+    """
+    if not candidates:
+        return []
+
+    lines: list[str] = []
+    for i, c in enumerate(candidates):
+        lines.append(
+            f"{c['id']}: [{c['label']}] (reach: {c['reach']})\n"
+            f"   {c['summary']}"
+        )
+    candidate_text = "\n\n".join(lines)
+
+    prompt = (
+        "You are a memory retrieval assistant. You are given a user query and "
+        "a set of candidate branches from a hierarchical memory graph. Each "
+        "branch has a label, a summary of what it contains, and a reach count "
+        "(how many underlying facts sit beneath it).\n"
+        "\n"
+        "Your job: decide which branches could plausibly contain information "
+        "relevant to the query.\n"
+        "\n"
+        "Output ONLY a JSON array of branch IDs (strings). No prose, no "
+        "explanation, no markdown code fences. If no branch is relevant, "
+        "output [].\n"
+        "\n"
+        "Rules:\n"
+        "- Keep a branch if the facts beneath it COULD answer the query -- "
+        "even if only partially. When genuinely unsure, KEEP. Wrongly "
+        "discarding the branch containing the answer is the worst outcome; "
+        "over-keeping one extra branch is cheap.\n"
+        "- Discard branches that are clearly unrelated. Keeping everything "
+        "defeats the purpose -- but err on the side of keeping.\n"
+        "- You may keep zero, one, or several branches. Multiple branches "
+        "may be relevant.\n"
+        "- Do not make up branch IDs. Only return IDs from the candidate "
+        "list.\n"
+        "\n"
+        'Output format: ["branch_id_1", "branch_id_2"]'
+    )
+
+    client = openai.OpenAI(
+        base_url=config.DEEPSEEK_BASE_URL,
+        api_key=config.DEEPSEEK_API_KEY,
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=config.DEEPSEEK_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {
+                    "role": "user",
+                    "content": f"Query: {query}\n\nCandidates:\n{candidate_text}",
+                },
+            ],
+        )
+    except Exception:
+        logger.exception("Branch pruning failed")
+        raise
+
+    raw = response.choices[0].message.content
+    usage = response.usage
+    if usage:
+        logger.info(
+            "Prune response: tokens(prompt=%d, completion=%d, total=%d) raw=%r",
+            usage.prompt_tokens, usage.completion_tokens, usage.total_tokens,
+            raw if raw else None,
+        )
+    else:
+        logger.info("Prune response: raw=%r", raw if raw else None)
+
+    kept = _parse_prune_response(raw)
+    logger.info("Prune: kept %d/%d branches: %s", len(kept), len(candidates), kept)
+    return kept
+
+
+def _parse_prune_response(content: str) -> list[str]:
+    """Parse the LLM prune response into a list of branch IDs."""
+    import json
+
+    try:
+        data = json.loads(content)
+        if isinstance(data, list):
+            return [str(item) for item in data]
+    except json.JSONDecodeError:
+        pass
+
+    # Strip fences.
+    cleaned = content.strip()
+    if cleaned.startswith("```"):
+        first_nl = cleaned.find("\n")
+        if first_nl != -1:
+            cleaned = cleaned[first_nl + 1:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, list):
+            return [str(item) for item in data]
+    except json.JSONDecodeError:
+        pass
+
+    logger.error(
+        "Could not parse prune response. Raw: %s", content[:500],
+    )
+    raise ValueError(
+        f"Could not parse prune response as JSON array.\nRaw:\n{content}"
+    )
