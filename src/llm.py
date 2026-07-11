@@ -85,8 +85,32 @@ _EXTRACTION_PROMPT = (
     "this conversation, so the same project/person/object is not named two different\n"
     "ways.\n"
     "\n"
-    'Output format: [{"fact": "...", "topics": ["primary subject"]},\n'
-    '                 {"fact": "...", "topics": ["primary subject", "second subject"]}]'
+    "OWNERSHIP AND RELATIONSHIP FACTS - file under the THING, emit a relation:\n"
+    "- A fact asserting the user has/owns/created/built/works-on a named thing is\n"
+    "  primarily a fact ABOUT THAT THING - that it exists and whose it is - NOT a\n"
+    "  fact about the person.\n"
+    '    * "The user has a project called Gemory" -> topic: "Gemory" (NOT user profile).\n'
+    '    * "The user created MS Navigator" -> topic: "MS Navigator" (NOT user profile).\n'
+    '    * "The user owns a bald cypress" -> topic: "bald cypress tree".\n'
+    "- When a fact asserts a link between two subjects, add a \"relates\" field\n"
+    "  with the endpoints. Both endpoints must be the SAME topic phrases used\n"
+    "  elsewhere in this conversation.\n"
+    '    {"from": "user profile", "to": "Gemory"}\n'
+    '- "relates" is OPTIONAL and usually absent. Only include it when the fact\n'
+    "  genuinely ASSERTS A LINK between two subjects - not merely mentions\n"
+    "  another subject in passing.\n"
+    "- RELATION vs MULTI-TOPIC (critical - pick ONE):\n"
+    "  * Multi-topic (topics: [A, B]) = the fact is ABOUT both subjects.\n"
+    "  * Relation (relates: [{from: A, to: B}]) = the fact asserts a LINK between them.\n"
+    "  * For ownership/existence facts, use ONE topic (the thing) + ONE relation -\n"
+    '    NEVER two topics. "The user has a project called Gemory" -> one topic\n'
+    "    (Gemory) + one relation (user profile -> Gemory). Do NOT file under user\n"
+    "    profile too.\n"
+    "\n"
+    'Output format:\n'
+    '[{"fact": "...", "topics": ["primary subject"]},\n'
+    ' {"fact": "...", "topics": ["primary subject"],\n'
+    '  "relates": [{"from": "user profile", "to": "Gemory"}]}]'
 )
 
 
@@ -127,7 +151,17 @@ def _parse_extraction_response(content: str) -> list[dict]:
             # Strip empties and cap.
             topics = [str(t).strip() for t in topics_raw if t and str(t).strip()]
             topics = topics[:max_topics]
-            return {"fact": fact, "topics": topics}
+            relates_raw = item.get("relates", [])
+            if not isinstance(relates_raw, list):
+                relates_raw = []
+            relates = []
+            for rel in relates_raw:
+                if isinstance(rel, dict) and "from" in rel and "to" in rel:
+                    relates.append({
+                        "from": str(rel.get("from", "")),
+                        "to": str(rel.get("to", "")),
+                    })
+            return {"fact": fact, "topics": topics, "relates": relates}
         return {"fact": str(item), "topics": []}
 
     # ── Attempt 1: direct JSON parse ──────────────────────────────────

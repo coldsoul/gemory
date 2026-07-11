@@ -256,6 +256,20 @@ def store_facts(
                             node_id[:8], topic_id[:8],
                         )
 
+        # Process relation edges
+        relates_list = fact_item.get("relates", [])
+        if relates_list:
+            for rel in relates_list:
+                from_topic = rel.get("from", "")
+                to_topic = rel.get("to", "")
+                if from_topic and to_topic:
+                    from_id = resolve_topic(graph, from_topic)
+                    to_id = resolve_topic(graph, to_topic)
+                    if from_id and to_id:
+                        graph.add_relates_to_edge(
+                            from_id, to_id, origin_fact=node_id,
+                        )
+
     graph.save()
     logger.info(
         "Saved graph (%d new, %d corroborated, %d skipped, %d topics linked)",
