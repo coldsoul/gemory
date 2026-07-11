@@ -327,7 +327,7 @@ def summarize_cluster(member_facts: list[str]) -> dict[str, str]:
 
     Raises :class:`ValueError` if the LLM response cannot be parsed.
     """
-    logger.info("Summarizing cluster of %d facts", len(member_facts))
+    logger.info("Summarizing cluster of %d items", len(member_facts))
 
     facts_text = "\n".join(f"- {f}" for f in member_facts)
 

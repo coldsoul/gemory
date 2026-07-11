@@ -156,9 +156,32 @@ def summarize_layer(
 
     for mid in member_ids:
         node = graph.get_node(mid)
-        # For facts (level 0): use raw fact text.
-        # For abstractions: use their summary (content field, which
-        # should be the summary written at their creation time).
-        child_contents.append(node.content)
+        if node.level == 0:
+            # Facts: use raw fact text
+            child_contents.append(node.content)
+            has_facts = True
+        else:
+            # Abstractions: compound upward — use label + summary,
+            # never the bare label alone. Per §4: "children are
+            # abstractions → use their summaries, not raw leaves."
+            label = node.label or ""
+            summary = node.summary or ""
+            if summary:
+                child_contents.append(f"{label}: {summary}" if label else summary)
+            else:
+                # Legacy node without summary field — fall back to content
+                child_contents.append(node.content)
+            has_abstractions = True
+
+    # Distinguish facts from abstractions in the log
+    fact_count = sum(1 for mid in member_ids if graph.get_node(mid).level == 0)
+    abs_count = len(member_ids) - fact_count
+    if fact_count > 0 and abs_count == 0:
+        logger.info("Summarizing cluster of %d facts", len(child_contents))
+    elif abs_count > 0 and fact_count == 0:
+        logger.info("Summarizing cluster of %d abstractions", len(child_contents))
+    else:
+        logger.info("Summarizing cluster of %d members (%d facts, %d abstractions)",
+                     len(child_contents), fact_count, abs_count)
 
     return summarize_cluster(child_contents)
