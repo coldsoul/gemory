@@ -418,6 +418,48 @@ class GraphStore:
             "Added parent_of edge %s -> %s", parent_id, child_id,
         )
 
+    def add_relates_to_edge(
+        self, source: str, target: str, origin_fact: str = "",
+    ) -> None:
+        """Add a directed ``relates_to`` edge.
+
+        Idempotent: if a ``relates_to`` edge already exists between the same
+        pair it is not duplicated.  If a different edge type exists between
+        them, a warning is logged and the call is skipped (DiGraph limitation
+        — one edge per node pair).
+        """
+        if self._graph.has_edge(source, target):
+            edge = self._graph.get_edge_data(source, target)
+            if edge.get("relation") == "relates_to":
+                return  # already exists
+            logger.warning(
+                "Cannot add relates_to edge %s->%s: edge exists with "
+                "relation=%s", source[:8], target[:8], edge.get("relation"),
+            )
+            return
+        self._graph.add_edge(
+            source, target,
+            relation="relates_to",
+            provenance="stated",
+            origin_fact=origin_fact,
+        )
+        logger.info(
+            "Added relates_to edge %s -> %s", source[:8], target[:8],
+        )
+
+    def get_edges_by_relation(
+        self, relation: str,
+    ) -> list[tuple[str, str, dict]]:
+        """Return all edges with the given relation type.
+
+        Each element is ``(source, target, edge_data_dict)``.
+        """
+        result: list[tuple[str, str, dict]] = []
+        for u, v, data in self._graph.edges(data=True):
+            if data.get("relation") == relation:
+                result.append((u, v, data))
+        return result
+
     def get_topic_nodes(self) -> list[Node]:
         """Return all nodes whose ``abstraction_kind`` is ``"topic"``."""
         return [

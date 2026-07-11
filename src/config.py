@@ -125,3 +125,12 @@ MIN_REACH: int = int(os.getenv("MIN_REACH", "5"))
 # Hard cap on topics per fact returned by the extractor.
 # Multi-membership is the exception, not the default -- prefer 1.
 MAX_TOPICS_PER_FACT: int = int(os.getenv("MAX_TOPICS_PER_FACT", "2"))
+
+
+# ---------------------------------------------------------------------------
+# Relation edges
+# ---------------------------------------------------------------------------
+
+# Fraction of a category's members that must carry a relation from X
+# before the dreamer lifts it to the category (start strict at 1.0 = all).
+RELATION_LIFT_RATIO: float = float(os.getenv("RELATION_LIFT_RATIO", "1.0"))
