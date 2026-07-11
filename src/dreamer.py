@@ -44,6 +44,7 @@ from src.config import (
     MEMORY_PATH,
     MIN_CLUSTER_SIZE,
     MIN_REACH,
+    RELATION_LIFT_RATIO,
 )
 from src.consolidate import cluster_layer, summarize_layer
 from src.graph import GraphStore
@@ -298,6 +299,14 @@ def _consolidate_layer(
             member_ids = list(cluster)
             new_abstractions.append({"id": abs_id, "member_ids": member_ids})
 
+            # Lift relations from common sources to the new category.
+            lifted = _lift_relations(graph, abs_id, member_ids)
+            if lifted:
+                logger.info(
+                    "Lifted %d relations to abstraction %s",
+                    lifted, abs_id[:8],
+                )
+
     return new_abstractions
 
 
@@ -474,6 +483,63 @@ def _print_diff_report(diff: dict) -> None:
             "categorical groupings cosine cannot detect."
         )
     print("=" * 70)
+
+
+# ---------------------------------------------------------------------------
+# Relation lifting
+# ---------------------------------------------------------------------------
+
+def _lift_relations(
+    graph: GraphStore,
+    category_id: str,
+    member_ids: list[str],
+) -> int:
+    """Lift relates_to edges from common sources to a newly created category.
+
+    If a source node X has relates_to edges to all (or >=
+    RELATION_LIFT_RATIO fraction) of the category's members, create a
+    derived ``relates_to`` edge X -> category.
+
+    Leaf edges are KEPT -- lifting adds, never replaces.
+    Returns the number of lifted edges created.
+    """
+    # Gather all relates_to edges incoming to any member.
+    incoming: dict[str, set[str]] = {}
+    for source, target, data in graph.get_edges_by_relation("relates_to"):
+        if target in member_ids:
+            incoming.setdefault(source, set()).add(target)
+
+    threshold = max(1, int(len(member_ids) * RELATION_LIFT_RATIO))
+
+    lifted = 0
+    for source_id, target_members in incoming.items():
+        if len(target_members) < threshold:
+            continue
+
+        # Check if a lifted edge already exists.
+        already = any(
+            s == source_id and t == category_id
+            for s, t, d in graph.get_edges_by_relation("relates_to")
+        )
+        if already:
+            continue
+
+        # Add derived edge (bypass the idempotency guard because this is
+        # a new relation type or the edge does not yet exist).
+        graph._graph.add_edge(
+            source_id, category_id,
+            relation="relates_to",
+            provenance="derived",
+            origin_fact="",
+        )
+        lifted += 1
+        logger.info(
+            "Lifted relation: %s -> %s (from %d/%d members)",
+            source_id[:8], category_id[:8],
+            len(target_members), len(member_ids),
+        )
+
+    return lifted
 
 
 def _print_dry_run_report(
