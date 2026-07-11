@@ -545,6 +545,18 @@ def cluster_by_llm(node_summaries: list[dict[str, str]]) -> list[set[int]]:
         "  any of them are. \"Software projects\" says something: they are all\n"
         "  software.\n"
         "\n"
+        "PERSON vs THINGS THEY OWN -- the person is never a peer:\n"
+        "- The user/person node (the profile representing who the user is) is\n"
+        "  NEVER a member of a category of things the user owns, builds, or\n"
+        "  tends. A person is not a peer of their projects, their plants, or\n"
+        "  their tools.\n"
+        "- The profile belongs alongside project categories as a sibling, never\n"
+        '  inside one. It stands in a relation to those things (e.g. "created",\n'
+        '  "owns", "tends") -- it is not one of them.\n'
+        "- If the items include both a person and things they made/own, remove\n"
+        "  the person from any cluster of those things. The things may cluster\n"
+        "  with each other if they share a kind; the person does not join them.\n"
+        "\n"
         "CRITICAL RULES -- confabulation prevention:\n"
         '- "Things the user made/has/did" is NOT a theme -- it is a restatement\n'
         "  of the fact that these items exist in one person's memory, and applies\n"
