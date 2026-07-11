@@ -184,4 +184,4 @@ def summarize_layer(
         logger.info("Summarizing cluster of %d members (%d facts, %d abstractions)",
                      len(child_contents), fact_count, abs_count)
 
-    return summarize_cluster(child_contents)
+    return summarize_cluster(child_contents, is_abstraction=(fact_count == 0))
