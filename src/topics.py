@@ -81,6 +81,7 @@ def resolve_topic(graph: GraphStore, proposed_topic: str) -> str | None:
         kind="abstraction",
         label=proposed_topic,
         abstraction_kind="topic",
+        summary="",
     )
     # Set level to 1.
     graph.set_node_attr(topic_id, "level", 1)
