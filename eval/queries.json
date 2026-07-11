@@ -1,0 +1,158 @@
+{
+  "_comment": "Gemory traversal-recall evaluation query set. Authored from the real graph BEFORE running any recall method. Queries are phrased naturally, NOT reusing the wording of stored facts (quoting the corpus would rig the test toward vector search). expected_facts are node ids; expected_root is the root-level branch whose subtree must be kept (used for prune-error measurement).",
+  "_roots": {
+    "5c91d492": "Personal software projects (L2, reach 52)",
+    "129622bb": "MS community project in Sofia — the person/profile node (L1, reach 6)",
+    "8350df09": "Bald cypress tree plans (L1, reach 6)",
+    "9612840d": "Home documentation method (L1, reach 1)"
+  },
+  "queries": [
+    {
+      "id": "q01",
+      "type": "point",
+      "query": "What frontend stack did I pick for the MS site?",
+      "expected_facts": ["a3b9ec8b"],
+      "expected_roots": ["5c91d492"],
+      "note": "Astro + Tailwind. Query says 'frontend stack', fact says 'built with Astro and Tailwind CSS' — no lexical overlap on the key term."
+    },
+    {
+      "id": "q02",
+      "type": "point",
+      "query": "Is the terminal interface I'm planning going to let me change anything, or just look?",
+      "expected_facts": ["6e506d0d"],
+      "expected_roots": ["5c91d492"],
+      "note": "Read-only initially. Deliberately avoids the words 'TUI' and 'read-only'."
+    },
+    {
+      "id": "q03",
+      "type": "point",
+      "query": "How does my memory system decide two conversations are the same one?",
+      "expected_facts": ["4e6d728c"],
+      "expected_roots": ["5c91d492"],
+      "note": "Hashing the first exchange. Avoids 'idempotency' and 'source_id'."
+    },
+    {
+      "id": "q04",
+      "type": "point",
+      "query": "What size container is my tree in right now?",
+      "expected_facts": ["2b61cf47"],
+      "expected_roots": ["8350df09"],
+      "note": "5-7L plastic pot. Requires discarding three other roots."
+    },
+    {
+      "id": "q05",
+      "type": "point",
+      "query": "Which currency does the Bulgarian health info site quote?",
+      "expected_facts": ["3c8003cb"],
+      "expected_roots": ["5c91d492"],
+      "note": "Euro since Jan 2026. Buried deep in a 24-fact topic — a hard point lookup."
+    },
+    {
+      "id": "q06",
+      "type": "point",
+      "query": "Where am I hosting the static site?",
+      "expected_facts": ["a3b9ec8b"],
+      "expected_roots": ["5c91d492"],
+      "note": "Cloudflare Pages or Netlify."
+    },
+
+    {
+      "id": "q07",
+      "type": "category",
+      "query": "What's my current tech stack across everything I build?",
+      "expected_facts": ["97c2508a", "a3b9ec8b"],
+      "expected_roots": ["5c91d492"],
+      "note": "SHARPEST THESIS TEST. Nothing in the corpus contains the phrase 'tech stack'. The query names a category; the facts are instances (Python/uv/NetworkX/DeepSeek for Gemory; Astro/Tailwind/Cloudflare for the site). Flat search has no anchor."
+    },
+    {
+      "id": "q08",
+      "type": "category",
+      "query": "What accessibility considerations have I made anywhere?",
+      "expected_facts": ["831ade3f", "8cf1e1bc", "cfd53825", "2f915b3c"],
+      "expected_roots": ["5c91d492"],
+      "note": "Category query. 'Accessibility' appears in one fact but the concept spans several (calm colors/large text, card-based to avoid looking like medical advice, friend-like tone, ending on empowerment)."
+    },
+    {
+      "id": "q09",
+      "type": "category",
+      "query": "What design principles guide my memory system's architecture?",
+      "expected_facts": ["98112cfa", "95d09849", "4f8d7454", "0a3a175c", "3601232d", "36d24c6b", "4894b80a"],
+      "expected_roots": ["5c91d492"],
+      "note": "Category: 'design principles' is not a phrase in the corpus. Facts are the DAG, reach gating, relation edges, canonicalization, hybrid clustering, multi-subject, reach exclusions."
+    },
+    {
+      "id": "q10",
+      "type": "category",
+      "query": "What editorial decisions did I make about medical content?",
+      "expected_facts": ["2f04281b", "d7cf6452", "06d55183", "e85536ef", "cfd53825"],
+      "expected_roots": ["5c91d492"],
+      "note": "Category. 'Editorial decisions' appears nowhere; the instances are no drug names, disclaimer, no treatment promotion, genetics correction, honest-about-uncertainty tone."
+    },
+    {
+      "id": "q11",
+      "type": "category",
+      "query": "What are my horticultural plans for this year versus next?",
+      "expected_facts": ["87606ecc", "ab6b5ad7", "c6119a68"],
+      "expected_roots": ["8350df09"],
+      "note": "Category query, non-software branch. 'Horticultural' appears nowhere. Tests pruning away three software/personal roots."
+    },
+
+    {
+      "id": "q12",
+      "type": "completeness",
+      "query": "Tell me everything about the MS information website.",
+      "expected_facts": ["d73a07cb", "92d05a72", "8cf1e1bc", "831ade3f", "a3b9ec8b", "180d5fbd", "9d89e419", "de4e6822", "cfd53825", "2f04281b", "3aadbb93", "ea09933f", "2f915b3c", "d7cf6452", "98bc83e8", "91f731e4", "7cf7f274", "e85536ef", "06d55183", "89d2f742", "3c8003cb", "e80a83cd", "0340ff1b", "aaf4985b"],
+      "expected_roots": ["5c91d492"],
+      "note": "All 24 facts under ms-navigator.bg. Measure COVERAGE (fraction returned). Flat top-k structurally caps out; traversal returns the subtree. Near-tautological — measure, don't over-claim."
+    },
+    {
+      "id": "q13",
+      "type": "completeness",
+      "query": "Give me the full picture on the bonsai.",
+      "expected_facts": ["47d5e50f", "2b61cf47", "cd10d0a9", "87606ecc", "c6119a68", "ab6b5ad7"],
+      "expected_roots": ["8350df09"],
+      "note": "All 6 bald cypress facts. Smaller subtree — a fairer completeness test than q12 since flat top-k could plausibly get all 6."
+    },
+    {
+      "id": "q14",
+      "type": "completeness",
+      "query": "Everything I've decided about how the dreamer works.",
+      "expected_facts": ["ac18ae79", "95d09849", "41b67ee7", "35fb5666", "3601232d", "2f974994"],
+      "expected_roots": ["5c91d492"],
+      "note": "6 dreamer facts scattered inside a 24-fact topic. Tests whether traversal can be complete on a SUB-topic slice, not just a whole subtree — this is the harder completeness case."
+    },
+
+    {
+      "id": "q15",
+      "type": "gist",
+      "query": "What am I working on these days?",
+      "expected_facts": [],
+      "expected_roots": ["5c91d492"],
+      "note": "NO single fact answers this — the answer exists only as SUMMARIES (the 'Personal software projects' node's summary, plus its children's). Flat search structurally cannot do this; it will return whatever facts are most similar to a vague query. Judge by whether the response is a useful orientation, not by fact overlap. expected_facts intentionally empty."
+    },
+    {
+      "id": "q16",
+      "type": "gist",
+      "query": "Who am I? Give me a sense of the person, not the projects.",
+      "expected_facts": ["56bb2273", "504a4975", "894f0f13", "c4a70a93", "d1453ff6", "25036f84"],
+      "expected_roots": ["129622bb"],
+      "note": "IMPORTANT DIAGNOSTIC. The person node is labelled 'MS community project in Sofia' — which reads as a project, not an identity. If the pruner discards it here, that is a PRUNE ERROR and a direct finding about what labels must carry. Watch this one closely."
+    },
+    {
+      "id": "q17",
+      "type": "gist",
+      "query": "What kinds of things do I spend my time on outside of coding?",
+      "expected_facts": ["47d5e50f", "f247b357"],
+      "expected_roots": ["8350df09", "9612840d"],
+      "note": "MULTI-ROOT gist. Requires keeping TWO branches (bonsai, home documentation) and discarding the software one. Tests whether the pruner can hold multiple branches rather than collapsing to one."
+    },
+    {
+      "id": "q18",
+      "type": "gist",
+      "query": "Why did I start building the health site in the first place?",
+      "expected_facts": ["894f0f13", "56bb2273", "c4a70a93", "d1453ff6"],
+      "expected_roots": ["129622bb", "5c91d492"],
+      "note": "MULTI-ROOT and the most interesting query in the set. The MOTIVATION lives in the person node; the SITE lives in the projects node. Requires keeping both. This is exactly the case the relates_to edge captures but top-down traversal does NOT use — so if traversal fails here, that is evidence for associative recall."
+    }
+  ]
+}
