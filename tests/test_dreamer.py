@@ -21,7 +21,7 @@ from tests.stubs import LookupStub, vectors_with_cosines
 
 def _stub_summarize(label: str = "Test Theme", summary: str = "A test summary."):
     """Return a factory that produces a fixed summarization result."""
-    return lambda facts: {"label": label, "summary": summary}
+    return lambda facts, **kw: {"label": label, "summary": summary}
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +332,7 @@ class TestRecursiveConsolidation:
                 store.add_parent_edge(tid, f_ids[i * 5 + j])
             topics.append(tid)
 
-        def mock_summarize(facts):
+        def mock_summarize(facts, **kw):
             return {"label": "Auto Theme", "summary": "Enriched summary."}
 
         monkeypatch.setattr("src.consolidate.summarize_cluster", mock_summarize)
@@ -378,7 +378,7 @@ class TestTopicGroupsSimilarEmbeddings:
 
         call_log: list[list[str]] = []
 
-        def mock_summarize(facts_list):
+        def mock_summarize(facts_list, **kw):
             call_log.append(facts_list)
             return {"label": "Auto Theme", "summary": "Enriched summary."}
 
@@ -431,7 +431,7 @@ class TestLevel2ThemeGrouping:
                 store.add_parent_edge(tid, f_ids[i * 5 + j])
             topics.append(tid)
 
-        def mock_summarize(facts):
+        def mock_summarize(facts, **kw):
             return {"label": "Auto Theme", "summary": "Theme summary."}
 
         monkeypatch.setattr("src.consolidate.summarize_cluster", mock_summarize)
@@ -461,7 +461,7 @@ class TestNaturalTermination:
             vec[i] = 1.0
             store.add_node(f"fact {i}", vec, {"source_id": f"s{i}"})
 
-        def never_called(facts):
+        def never_called(facts, **kw):
             assert False, "summarize_cluster should not be called"
             return {}
 
@@ -498,7 +498,7 @@ class TestIdempotencyPreservesTopics:
             for j in range(5):
                 store.add_parent_edge(tid, f_ids[i * 5 + j])
 
-        def mock_summarize(facts):
+        def mock_summarize(facts, **kw):
             return {"label": "Auto Theme", "summary": "Theme summary."}
 
         monkeypatch.setattr("src.consolidate.summarize_cluster", mock_summarize)
@@ -639,7 +639,7 @@ class TestProfileTheme:
         monkeypatch.setattr("src.llm.cluster_by_llm", stub_cluster)
 
         # Stub summarize to return a valid theme.
-        def stub_summarize(contents):
+        def stub_summarize(contents, **kw):
             return {
                 "label": "User Profile",
                 "summary": "Attributes and characteristics of the user.",

@@ -320,38 +320,81 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
 # Cluster summarization
 # ---------------------------------------------------------------------------
 
-def summarize_cluster(member_facts: list[str]) -> dict[str, str]:
-    """Ask the LLM to produce a label and summary for a cluster of facts.
+def summarize_cluster(member_facts: list[str], is_abstraction: bool = False) -> dict[str, str]:
+    """Ask the LLM to produce a label and summary for a cluster.
+
+    Args:
+        member_facts: The content items to summarize.
+        is_abstraction: If True, the members are abstraction summaries (not raw
+            facts). The prompt adapts: characterize what the group IS, do not
+            enumerate members, refer to them as items/subjects not "facts."
 
     Returns a dict with keys ``"label"`` and ``"summary"``.
 
     Raises :class:`ValueError` if the LLM response cannot be parsed.
     """
-    logger.info("Summarizing cluster of %d items", len(member_facts))
+    what = "abstractions" if is_abstraction else "facts"
+    logger.info("Summarizing cluster of %d %s", len(member_facts), what)
 
     facts_text = "\n".join(f"- {f}" for f in member_facts)
 
-    prompt = (
-        "You are a knowledge consolidator for a long-term memory system. "
-        "You are given a set of related facts about a user. "
-        "Your job is to identify the common theme and write a concise summary.\n"
-        "\n"
-        "Output ONLY a JSON object with exactly two keys: \"label\" and \"summary\". "
-        "No prose, no explanation, no markdown code fences.\n"
-        "\n"
-        "Rules:\n"
-        "- \"label\": a SHORT theme label (3-6 words), something you would scan in a list.\n"
-        "- \"summary\": a 1-2 sentence description of what these facts have in common, "
-        "written to be read months later with no other context. Self-contained, no "
-        "dangling pronouns.\n"
-        "- Do NOT invent facts not supported by the member facts. The abstraction "
-        "describes the cluster; it does not add new claims.\n"
-        "- If the facts do not share a clear common theme, use a label like "
-        "\"Miscellaneous facts\" and state honestly in the summary that no strong "
-        "theme emerged.\n"
-        "\n"
-        "Format: {\"label\": \"theme label\", \"summary\": \"1-2 sentence summary\"}"
-    )
+    if is_abstraction:
+        prompt = (
+            "You are a knowledge consolidator for a long-term memory system. "
+            "You are given summaries of several related topics or themes. "
+            "Your job is to characterise what these items have in common — "
+            "the kind of thing they share, the pattern the grouping reveals.\n"
+            "\n"
+            "Output ONLY a JSON object with exactly two keys: \"label\" and \"summary\". "
+            "No prose, no explanation, no markdown code fences.\n"
+            "\n"
+            "Rules:\n"
+            '- "label": a SHORT theme label (3-6 words) that says what these '
+            "items ARE, not whose they are. Good: \"Self-directed software projects\". "
+            "Bad: \"User's projects and tools\" (ownership framing carries no "
+            "information — it merely restates that the items exist in one person's "
+            "memory).\n"
+            '- "summary": a 1-2 sentence characterisation of what the group is — '
+            "the kind of thing the members share, what they have in common, what "
+            "pattern the grouping reveals. Write a synthesis that says something "
+            "the individual summaries do not. Do NOT enumerate or list the members "
+            "(they are already reachable as children; restating them adds nothing). "
+            "Refer to them as items, projects, or subjects, never as \"facts.\"\n"
+            "- Do NOT invent themes not supported by the member summaries.\n"
+            "- If the items do not share a clear common kind, use a label like "
+            "\"Miscellaneous items\" and state honestly in the summary that no "
+            "strong pattern emerged.\n"
+            "\n"
+            "Example: given summaries of four software tools (a memory system, "
+            "a health website, a TUI explorer, a CLI tool), your output might be:\n"
+            '{"label": "Self-directed software projects", '
+            '"summary": "Small, self-directed software builds, each solving a '
+            'personal or community problem rather than aiming at scale."}\n'
+            "\n"
+            "Format: {\"label\": \"theme label\", \"summary\": \"1-2 sentence summary\"}"
+        )
+    else:
+        prompt = (
+            "You are a knowledge consolidator for a long-term memory system. "
+            "You are given a set of related facts about a user. "
+            "Your job is to identify the common theme and write a concise summary.\n"
+            "\n"
+            "Output ONLY a JSON object with exactly two keys: \"label\" and \"summary\". "
+            "No prose, no explanation, no markdown code fences.\n"
+            "\n"
+            "Rules:\n"
+            "- \"label\": a SHORT theme label (3-6 words), something you would scan in a list.\n"
+            "- \"summary\": a 1-2 sentence description of what these facts have in common, "
+            "written to be read months later with no other context. Self-contained, no "
+            "dangling pronouns.\n"
+            "- Do NOT invent facts not supported by the member facts. The abstraction "
+            "describes the cluster; it does not add new claims.\n"
+            "- If the facts do not share a clear common theme, use a label like "
+            "\"Miscellaneous facts\" and state honestly in the summary that no strong "
+            "theme emerged.\n"
+            "\n"
+            "Format: {\"label\": \"theme label\", \"summary\": \"1-2 sentence summary\"}"
+        )
 
     client = openai.OpenAI(
         base_url=config.DEEPSEEK_BASE_URL,

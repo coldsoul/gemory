@@ -83,7 +83,7 @@ class TestSummarizeLayer:
         # Capture what summarize_cluster receives
         received = []
 
-        def capture_summarize(contents):
+        def capture_summarize(contents, **kw):
             received.append(contents)
             return {"label": "Test", "summary": "A test summary."}
 
@@ -123,7 +123,7 @@ class TestSummarizeLayer:
         # Capture summarize_cluster
         received = []
 
-        def capture(contents):
+        def capture(contents, **kw):
             received.append(contents)
             return {"label": "Theme", "summary": "Higher summary."}
 
