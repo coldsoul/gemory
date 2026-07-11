@@ -95,11 +95,13 @@ def _build_similarity_graph(graph: GraphStore, node_ids: list[str]) -> nx.Graph:
             if sim >= config.CLUSTER_SIM_THRESHOLD:
                 g.add_edge(valid_ids[i], valid_ids[j], weight=sim)
 
-    # Also add edges for any existing ``related`` edges in the store.
-    for edge in graph.get_all_edges():
-        if edge.source in id_to_idx and edge.target in id_to_idx:
-            if not g.has_edge(edge.source, edge.target):
-                g.add_edge(edge.source, edge.target, weight=edge.weight)
+    # Also add edges for explicit ``related`` edges from the store.
+    # (NOT ``relates_to`` — relations are directional links between
+    # entities, not cohesion signals and must never be used for clustering.)
+    for u, v, data in graph.get_edges_by_relation("related"):
+        if u in id_to_idx and v in id_to_idx:
+            if not g.has_edge(u, v):
+                g.add_edge(u, v, weight=data.get("weight", 0.5))
 
     return g
 
