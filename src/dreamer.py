@@ -274,11 +274,15 @@ def _consolidate_layer(
             continue
 
         summary_text = summary_result.get("summary", "").lower()
+        label_text = summary_result.get("label", "").lower()
         veto_phrases = [
             "no common theme", "no strong theme", "miscellaneous facts",
-            "no clear theme", "unrelated",
+            "no clear theme", "unrelated", "without a clear",
+            "not a coherent", "no coherent", "miscellaneous",
         ]
-        if any(phrase in summary_text for phrase in veto_phrases):
+        # Check both label and summary for veto phrases
+        combined = f"{label_text} {summary_text}"
+        if any(phrase in combined for phrase in veto_phrases):
             logger.info(
                 "Vetoing cluster: summarizer produced non-theme result (%r)",
                 summary_text[:80],
