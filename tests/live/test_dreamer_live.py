@@ -35,13 +35,13 @@ class TestDreamerLive:
             print(result.stderr)
         print("=" * 70)
 
-        print("\nReview checklist (§11 of dreamer spec):")
-        print("  1. Agreement bucket: do dense project topics appear here?")
-        print("  2. LLM-only bucket: does the user-attribute grouping appear?")
-        print("     (cosine cannot detect it, LLM should)")
-        print("  3. Unrelated projects: are they NOT forced into a spurious theme?")
-        print("  4. Reach: do abstractions clear MIN_REACH?")
-        print("\nIf all four pass, the consolidation amendment is validated.")
+        print("\nReview checklist (relation edges amendment):")
+        print("  1. Hub fixed: does user-profile summary NO LONGER enumerate projects?")
+        print("  2. Clusterer: are the 4+ unrelated topics NOT grouped together?")
+        print("  3. Clean roots: do distinct topic roots exist (no confabulated parent)?")
+        print("  4. Lifting: if a 'software projects' category forms, is there a")
+        print("     derived 'user profile → software projects' edge?")
+        print("\nIf all four pass, the relation edges amendment is validated.")
 
     def test_hybrid_dry_run_on_real_graph(self):
         """Run dreamer --cluster-method hybrid (dry-run) on the real graph."""
