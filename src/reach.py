@@ -27,7 +27,9 @@ def compute_reach(graph: GraphStore, node_ids: list[str]) -> int:
             # Leaf fact -- count it, don't traverse further.
             continue
 
-        # Traverse children.
+        # Traverse children via parent_of only.
+        # get_children already filters by relation == "parent_of", so
+        # relates_to edges never contribute to reach.
         children = graph.get_children(nid)
         stack.extend(children)
 
