@@ -191,18 +191,21 @@ def _create_abstraction(
             return None
 
     label = result.get("label", "Unlabeled cluster")
-    summary = result.get("summary", "No summary available")
+    summary_text = result.get("summary", "")
 
-    # Embed the abstraction text.
-    embedding = embed(f"{label}. {summary}")
+    # Embed the abstraction text (label + summary).
+    embedding = embed(f"{label}. {summary_text}")
 
     # Compute level as one above the highest child level.
     max_child_level = max((n.level for n in member_nodes), default=0)
     abs_level = max_child_level + 1
 
     # Create the abstraction node.
+    # content = short label (for backward compat reading "content")
+    # label = authoritative short label
+    # summary = authoritative prose description
     abs_id = graph.add_node(
-        content=summary,
+        content=label,
         embedding=embedding,
         provenance={
             "source_id": f"dreamer:{run_id}",
@@ -212,6 +215,7 @@ def _create_abstraction(
         },
         kind="abstraction",
         label=label,
+        summary=summary_text,
     )
 
     # Set level.
@@ -320,12 +324,14 @@ def _run_consolidation_pass(
             if children:
                 try:
                     result = summarize_layer(graph, set(children))
-                    summary = result.get("summary", "")
-                    label = result.get("label", topic.label)
-                    if summary and summary != topic.content:
-                        graph.set_node_attr(topic.id, "content", summary)
-                    if label and label != topic.label:
-                        graph.set_node_attr(topic.id, "label", label)
+                    summary_text = result.get("summary", "")
+                    new_label = result.get("label", topic.label)
+                    # Set summary on the topic — do NOT overwrite content (label).
+                    if summary_text:
+                        graph.set_node_attr(topic.id, "summary", summary_text)
+                    # Optionally refine label if summarizer has a better one.
+                    if new_label and new_label != topic.label and len(new_label) < 50:
+                        graph.set_node_attr(topic.id, "label", new_label)
                     r = compute_reach(graph, [topic.id])
                     graph.set_node_attr(topic.id, "reach", r)
                     logger.info(

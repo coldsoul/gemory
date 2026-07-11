@@ -119,22 +119,27 @@ class GraphStore:
                     f"embedding in the sidecar ({self._embeddings_path})"
                 )
 
-        # Migrate old schema: nodes created before kind/label/abstraction_kind
-        # were added.
+        # Migrate old schema: nodes created before newer fields.
         migrated = 0
         for nid in self._graph.nodes():
             attrs = self._graph.nodes[nid]
             if "kind" not in attrs:
                 attrs["kind"] = "fact"
                 migrated += 1
-            if "label" not in attrs:
-                attrs["label"] = ""
+            if "label" not in attrs or not attrs["label"]:
+                # Only backfill label for abstraction nodes; facts keep "".
+                if attrs.get("kind") == "abstraction":
+                    attrs["label"] = attrs.get("content", "")[:80]
+                else:
+                    attrs["label"] = ""
             if "abstraction_kind" not in attrs:
                 attrs["abstraction_kind"] = ""
                 migrated += 1
             if "reach" not in attrs:
                 attrs["reach"] = 0
                 migrated += 1
+            if "summary" not in attrs:
+                attrs["summary"] = ""
         if migrated:
             logger.info(
                 "Migrated %d nodes missing schema fields", migrated,
@@ -182,13 +187,14 @@ class GraphStore:
         label: str = "",
         abstraction_kind: str = "",
         reach: int = 0,
+        summary: str = "",
     ) -> str:
         """Create a new node in the graph.
 
         Parameters
         ----------
         content
-            Fact or abstraction text.
+            Fact or abstraction text (short label for abstractions).
         embedding
             Vector embedding of *content*.
         provenance
@@ -202,6 +208,8 @@ class GraphStore:
             ``"theme"`` (dreamer-created higher-level).
         reach
             Transitive leaf count; 0 for facts, computed for abstractions.
+        summary
+            1-2 sentence prose description (abstractions only).
 
         Returns the auto-generated UUID4 node id.
         """
@@ -219,6 +227,7 @@ class GraphStore:
             label=label,
             abstraction_kind=abstraction_kind,
             reach=reach,
+            summary=summary,
         )
         self._embeddings[node_id] = embedding
         logger.info(

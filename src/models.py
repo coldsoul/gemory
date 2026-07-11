@@ -27,6 +27,7 @@ class Node:
     label: str = ""                       # Short theme label for abstraction nodes; empty for facts
     abstraction_kind: str = ""            # "" (not an abstraction), "topic" (level-1 topic), "theme" (higher-level)
     reach: int = 0                        # Transitive leaf count; 0 for facts (computed), N for abstractions
+    summary: str = ""                     # 1-2 sentence prose description (abstractions only)
 
 
 @dataclass

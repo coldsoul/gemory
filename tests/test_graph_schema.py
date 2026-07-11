@@ -36,6 +36,20 @@ class TestNodeKindAndLabel:
         assert node.abstraction_kind == "topic"
         assert node.label == "Gemory"
 
+    def test_add_node_with_summary(self, empty_graph) -> None:
+        nid = empty_graph.add_node(
+            "Test", [1.0, 0.0], {"source_id": "s1"},
+            summary="A test summary.",
+            kind="abstraction",
+        )
+        node = empty_graph.get_node(nid)
+        assert node.summary == "A test summary."
+
+    def test_add_node_defaults_summary(self, empty_graph) -> None:
+        nid = empty_graph.add_node("fact", [1.0, 0.0], {"source_id": "s1"})
+        node = empty_graph.get_node(nid)
+        assert node.summary == ""
+
     def test_add_node_defaults_kind_and_label(self, empty_graph) -> None:
         nid = empty_graph.add_node(
             "fact content", [0.1, 0.2], {"source_id": "s1"},
