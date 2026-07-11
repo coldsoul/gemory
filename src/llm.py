@@ -485,6 +485,23 @@ def cluster_by_llm(node_summaries: list[dict[str, str]]) -> list[set[int]]:
         "- A cluster should have at least 2 items.\n"
         "- Do not invent themes not supported by the items.\n"
         "\n"
+        "SAME KIND OF THING -- a legitimate grouping criterion:\n"
+        "- Items can share a theme because they are the SAME KIND OF THING,\n"
+        "  even when their purpose, technology, and domain differ entirely.\n"
+        '  * Four items described as "a zero-data static MS information site",\n'
+        '    "an agentic memory system using a graph of topics", "a read-only\n'
+        '    TUI for exploring a local Honcho install", and "a command-line tool\n'
+        '    for managing Honcho" -> theme: "software projects the user builds".\n'
+        '  * "a bald cypress bonsai", "a ficus bonsai", "a juniper bonsai" ->\n'
+        '    theme: "bonsai trees the user tends".\n'
+        "- The shared KIND -- what the items ARE -- is what makes the theme real,\n"
+        "  not whether they serve the same purpose or use the same technology.\n"
+        "- A shared relationship to the user (all things the user owns/made/has)\n"
+        "  is NOT a kind -- it merely restates that the items exist in one\n"
+        "  person's memory. \"All the user's projects\" says nothing about what\n"
+        "  any of them are. \"Software projects\" says something: they are all\n"
+        "  software.\n"
+        "\n"
         "CRITICAL RULES -- confabulation prevention:\n"
         '- "Things the user made/has/did" is NOT a theme -- it is a restatement\n'
         "  of the fact that these items exist in one person's memory, and applies\n"
