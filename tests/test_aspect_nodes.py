@@ -77,3 +77,113 @@ class TestFindOverlargeNodes:
         from src.dreamer import _find_overlarge_nodes
         candidates = _find_overlarge_nodes(store)
         assert candidates == []
+
+
+class TestDownwardSplit:
+    """``_split_node`` splits over-large nodes into aspect sub-nodes."""
+
+    def test_overlarge_node_is_split(self, aspect_graph, monkeypatch):
+        """A node with 25 children gets split into aspects."""
+        store, topic_a, topic_b = aspect_graph
+
+        monkeypatch.setattr(
+            "src.consolidate.summarize_cluster",
+            lambda facts, **kw: {"label": "Group", "summary": "A group of facts."},
+        )
+        monkeypatch.setattr("src.dreamer.embed", lambda x: [1.0, 0.0])
+
+        from src.dreamer import _split_node
+        created = _split_node(store, topic_a, "test_run")
+        assert len(created) > 0
+
+        children_after = store.get_children(topic_a)
+        assert len(children_after) > 0
+
+    def test_thin_node_not_split(self, aspect_graph, monkeypatch):
+        """A node with 5 children is not split."""
+        store, topic_a, topic_b = aspect_graph
+
+        from src.dreamer import _split_node
+        created = _split_node(store, topic_b, "test_run")
+        assert created == []
+
+    def test_leftovers_stay_as_direct_children(self, tmp_graph_path, monkeypatch):
+        """Children that don't cluster stay as direct children (not re-parented
+        into a misc aspect)."""
+        store = GraphStore(tmp_graph_path)
+
+        parent = store.add_node(
+            content="Parent", embedding=[1.0, 0.0],
+            provenance={
+                "source_id": "p", "label": "Parent", "timestamp": "",
+            },
+            kind="abstraction", label="Parent", reach=15,
+        )
+        store.set_node_attr(parent, "level", 1)
+
+        # 5 similar children (will cluster)
+        for i in range(5):
+            fid = store.add_node(
+                content=f"Similar {i}", embedding=[1.0, float(i) * 0.1],
+                provenance={"source_id": f"s{i}", "label": "", "timestamp": ""},
+            )
+            store.add_parent_edge(parent, fid)
+
+        # 10 far-apart children (will not cluster with the similar group)
+        for i in range(10):
+            fid = store.add_node(
+                content=f"Far {i}", embedding=[0.0, 1.0, float(i)],
+                provenance={"source_id": f"f{i}", "label": "", "timestamp": ""},
+            )
+            store.add_parent_edge(parent, fid)
+
+        monkeypatch.setattr(
+            "src.consolidate.summarize_cluster",
+            lambda facts, **kw: {"label": "Group", "summary": "A group."},
+        )
+        monkeypatch.setattr("src.dreamer.embed", lambda x: [1.0, 0.0])
+
+        from src.dreamer import _split_node
+        created = _split_node(store, parent, "test_run")
+
+        # At least some far children should remain as direct children
+        # (not all 15 children got re-parented under aspects)
+        children_after = store.get_children(parent)
+        # The parent should still have the far children as direct children
+        # plus possibly aspect children
+        far_direct = [c for c in children_after
+                      if "Far" in store.get_node(c).content]
+        assert len(far_direct) > 0
+
+    def test_no_misc_aspect_created(self, tmp_graph_path, monkeypatch):
+        """A non-theme summarizer result vetoes the aspect creation."""
+        store = GraphStore(tmp_graph_path)
+
+        parent = store.add_node(
+            content="Parent", embedding=[1.0, 0.0],
+            provenance={
+                "source_id": "p", "label": "Parent", "timestamp": "",
+            },
+            kind="abstraction", label="Parent", reach=25,
+        )
+        store.set_node_attr(parent, "level", 1)
+        for i in range(25):
+            fid = store.add_node(
+                content=f"Fact {i}", embedding=[float(i + 1), float(i + 1)],
+                provenance={"source_id": f"f{i}", "label": "", "timestamp": ""},
+            )
+            store.add_parent_edge(parent, fid)
+
+        # Stub summarizer to return a non-theme result.
+        monkeypatch.setattr(
+            "src.consolidate.summarize_cluster",
+            lambda facts, **kw: {
+                "label": "Miscellaneous facts",
+                "summary": "No common theme emerged.",
+            },
+        )
+        monkeypatch.setattr("src.dreamer.embed", lambda x: [1.0, 0.0])
+
+        from src.dreamer import _split_node
+        created = _split_node(store, parent, "test_run")
+        assert created == []  # Vetoed
