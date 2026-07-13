@@ -35,13 +35,17 @@ class TestDreamerLive:
             print(result.stderr)
         print("=" * 70)
 
-        print("\nReview checklist (relation edges amendment):")
-        print("  1. Hub fixed: does user-profile summary NO LONGER enumerate projects?")
-        print("  2. Clusterer: are the 4+ unrelated topics NOT grouped together?")
-        print("  3. Clean roots: do distinct topic roots exist (no confabulated parent)?")
-        print("  4. Lifting: if a 'software projects' category forms, is there a")
-        print("     derived 'user profile → software projects' edge?")
-        print("\nIf all four pass, the relation edges amendment is validated.")
+        print("\nReview checklist (aspect nodes amendment):")
+        print("  1. Splits: ms-navigator.bg (24) and Gemory (24) split into")
+        print("     recognisable, coherent aspects?")
+        print("  2. Untouched: Honcho TUI (3) and Home docs (1) NOT split?")
+        print("  3. No misc: zero 'Miscellaneous' aspect nodes anywhere?")
+        print("  4. Idempotent: re-running changes nothing?")
+        print("\nThen test the payoff:")
+        print('  Re-run the "Why did I start building the health site?" query')
+        print("  with traverse recall — should return ~3 motivation facts")
+        print("  instead of all 24 ms-navigator.bg facts.")
+        print("\nIf all five pass, the aspect nodes amendment is validated.")
 
     def test_hybrid_dry_run_on_real_graph(self):
         """Run dreamer --cluster-method hybrid (dry-run) on the real graph."""
