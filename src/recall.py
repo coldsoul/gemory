@@ -10,8 +10,6 @@ promising ones, and collects leaf facts.
 
 import logging
 
-import numpy as np
-
 from src import config as cfg, llm
 from src.graph import GraphStore
 
@@ -80,45 +78,52 @@ def recall(query: str, graph: GraphStore, top_k: int = 5) -> str:
 def traverse_recall(
     query: str,
     graph: GraphStore,
-    top_k: int = 10,
 ) -> tuple[str, dict]:
-    """Traversal-based recall: roots -> prune -> descend -> collect facts.
+    """Traversal-based recall: descend by parent_of, prune, return the
+    surviving region grouped by branch with summaries attached.
 
     Returns ``(formatted_text, metrics_dict)`` where *metrics_dict* contains
     ``layers_visited``, ``branches_pruned``, ``branches_kept``,
-    ``facts_collected``, and ``prune_decisions``.
+    ``facts_collected``, ``prune_decisions``, and ``budget_exceeded``.
+
+    No ranking is applied — the caller (an LLM with conversational context)
+    is better positioned to rank.  The budget is controlled by
+    :data:`config.MAX_RETURNED_FACTS`: if the kept region exceeds it,
+    pruning continues deeper; if the graph bottom is reached and the set
+    is still too large, summaries + partial facts are returned and the
+    over-large-node condition is logged loudly.
     """
     from src.llm import prune_branches
 
-    metrics = {
+    budget = cfg.MAX_RETURNED_FACTS
+
+    metrics: dict = {
         "layers_visited": 0,
         "branches_pruned": 0,
         "branches_kept": 0,
         "facts_collected": 0,
         "prune_decisions": [],
+        "budget_exceeded": False,
     }
 
-    # Get root nodes (nodes with no parent_of parent).
     all_nodes = {n.id: n for n in graph.all_nodes()}
-    roots = []
-    for n in all_nodes.values():
-        if not graph.get_parents(n.id):
-            roots.append(n.id)
-
+    roots = [n.id for n in all_nodes.values() if not graph.get_parents(n.id)]
     if not roots:
         return "No root nodes found in graph.", metrics
 
-    logger.info(
-        "Traversal recall: %d roots, query=%r", len(roots), query[:80],
-    )
+    logger.info("Traversal recall: %d roots, budget=%d, query=%r",
+                 len(roots), budget, query[:80])
 
     frontier = roots
-    branch_facts: dict[str, list] = {}  # kept branch ID → list of leaf facts under it
     depth = 0
 
+    # Track the tree of kept nodes: {kept_parent_id: [(child_node, depth), ...]}
+    # This is what we'll render at the end.
+    kept_tree: dict[str, list] = {}
+
     while frontier and depth < cfg.MAX_TRAVERSAL_DEPTH:
-        abstractions = []
-        leaf_facts = []
+        abstractions: list = []
+        leaf_facts: list = []
         for nid in frontier:
             node = all_nodes[nid]
             if node.kind == "abstraction" or node.level > 0:
@@ -126,28 +131,27 @@ def traverse_recall(
             else:
                 leaf_facts.append(node)
 
-        # Collect leaf facts — tag them under their parent branch
+        # Collect leaf facts under their direct parents.
         for fact in leaf_facts:
-            parents = graph.get_parents(fact.id)
-            for pid in parents:
-                if pid not in branch_facts:
-                    branch_facts[pid] = []
-                branch_facts[pid].append(fact)
-
-        metrics["facts_collected"] += len(leaf_facts)
+            for pid in graph.get_parents(fact.id):
+                if pid not in kept_tree:
+                    kept_tree[pid] = []
+                kept_tree[pid].append(fact)
+                metrics["facts_collected"] += 1
 
         if not abstractions:
             break
 
-        # Build candidate list for pruning.
-        candidates = []
-        for node in abstractions:
-            candidates.append({
-                "id": node.id,
-                "label": node.label or node.content[:40],
-                "summary": node.summary or node.content,
-                "reach": node.reach,
-            })
+        # Prune.
+        candidates = [
+            {
+                "id": n.id,
+                "label": n.label or n.content[:40],
+                "summary": n.summary or n.content,
+                "reach": n.reach,
+            }
+            for n in abstractions
+        ]
 
         try:
             kept_ids = prune_branches(query, candidates)
@@ -169,124 +173,139 @@ def traverse_recall(
 
         if not kept_ids:
             logger.warning(
-                "TOTAL PRUNE at depth %d -- all %d branches discarded. "
-                "Query: %r",
+                "TOTAL PRUNE at depth %d -- all %d branches discarded. Query: %r",
                 depth, len(candidates), query[:80],
             )
             break
 
-        # Expand: next frontier = children of kept abstractions.
+        # Expand children of kept abstractions.
         next_frontier: set[str] = set()
         for kid in kept_ids:
             children = graph.get_children(kid)
             next_frontier.update(children)
+            # Record that this kept parent has children to explore.
+            if kid not in kept_tree:
+                kept_tree[kid] = []
 
         frontier = list(next_frontier)
         depth += 1
         metrics["layers_visited"] = depth
 
-    # Collect all facts from kept branches
-    kept_branch_ids = list(branch_facts.keys())
-    total_facts = sum(len(v) for v in branch_facts.values())
-    if not total_facts and depth > 0:
-        return (
-            "Traversal found no matching facts. "
-            f"(Visited {depth} layers, pruned {metrics['branches_pruned']} branches.)",
-            metrics,
+    # ── budget guard: if the kept region is too large, descend further ──
+    total_facts = sum(
+        sum(1 for n in nodes if n.level == 0)
+        for nodes in kept_tree.values()
+    )
+    while total_facts > budget and frontier and depth < cfg.MAX_TRAVERSAL_DEPTH:
+        # Budget exceeded — prune deeper.
+        abstractions = [all_nodes[nid] for nid in frontier
+                        if all_nodes[nid].kind == "abstraction" or all_nodes[nid].level > 0]
+        leaf_facts = [all_nodes[nid] for nid in frontier
+                      if all_nodes[nid].kind != "abstraction" and all_nodes[nid].level == 0]
+
+        for fact in leaf_facts:
+            for pid in graph.get_parents(fact.id):
+                if pid not in kept_tree:
+                    kept_tree[pid] = []
+                kept_tree[pid].append(fact)
+                metrics["facts_collected"] += 1
+
+        if not abstractions:
+            break
+
+        candidates = [
+            {"id": n.id, "label": n.label or n.content[:40],
+             "summary": n.summary or n.content, "reach": n.reach}
+            for n in abstractions
+        ]
+        try:
+            kept_ids = prune_branches(query, candidates)
+        except Exception:
+            kept_ids = [c["id"] for c in candidates]
+
+        if len(kept_ids) > cfg.MAX_BRANCHES_PER_LEVEL:
+            kept_ids = kept_ids[:cfg.MAX_BRANCHES_PER_LEVEL]
+
+        next_frontier = set()
+        for kid in kept_ids:
+            children = graph.get_children(kid)
+            next_frontier.update(children)
+            if kid not in kept_tree:
+                kept_tree[kid] = []
+
+        frontier = list(next_frontier)
+        depth += 1
+        metrics["layers_visited"] = depth
+        total_facts = sum(
+            sum(1 for n in nodes if n.level == 0)
+            for nodes in kept_tree.values()
         )
 
-    # Per-branch ranking: allocate result slots so a large subtree
-    # cannot drown a small one. The pruner decided all kept branches
-    # are relevant — the ranker must not silently un-decide that.
-    query_emb = llm.embed(query)
-    qn = np.linalg.norm(query_emb)
+    if total_facts > budget:
+        metrics["budget_exceeded"] = True
+        logger.warning(
+            "BUDGET EXCEEDED: %d facts after %d layers (budget=%d). "
+            "Returning summaries + partial facts. An intermediate abstraction "
+            "node may be needed (dreamer: split over-large node).",
+            total_facts, depth, budget,
+        )
 
-    def _score(node) -> float:
-        emb = graph._embeddings.get(node.id)
-        if not emb:
-            return 0.0
-        en = np.linalg.norm(emb)
-        if qn == 0 or en == 0:
-            return 0.0
-        return float(np.dot(np.array(query_emb) / qn, np.array(emb) / en))
-
-    # Rank facts within each branch
-    ranked_branches: dict[str, list] = {}
-    for bid, facts in branch_facts.items():
-        scored = [(_score(f), f) for f in facts]
-        scored.sort(key=lambda x: x[0], reverse=True)
-        ranked_branches[bid] = [f for _, f in scored]
-
-    # Allocate slots per branch proportional to relevance.
-    # A branch's relevance = the mean of its top-3 cosine scores
-    # (so a branch with a single strong signal isn't drowned).
-    n_branches = len(kept_branch_ids)
-    if n_branches == 0:
-        return "No matching facts found in traversal.", metrics
-
-    limit = min(top_k, cfg.MAX_FACTS_RETURNED)
-
-    branch_scores: dict[str, float] = {}
-    for bid in kept_branch_ids:
-        ranked = ranked_branches.get(bid, [])
-        if ranked:
-            top3 = [_score(n) for n in ranked[:3]]
-            branch_scores[bid] = sum(top3) / len(top3)
-        else:
-            branch_scores[bid] = 0.0
-
-    total_weight = sum(branch_scores.values())
-    if total_weight > 0:
-        raw_alloc = {bid: int(limit * s / total_weight) for bid, s in branch_scores.items()}
-    else:
-        raw_alloc = {bid: limit // n_branches for bid in kept_branch_ids}
-
-    # Cap: no branch gets more than 60% of slots, and at least 1 if it has facts.
-    max_cap = max(1, int(limit * 0.6))
-    for bid in kept_branch_ids:
-        if branch_scores[bid] > 0:
-            raw_alloc[bid] = min(raw_alloc.get(bid, 0), max_cap)
-            raw_alloc[bid] = max(raw_alloc.get(bid, 0), 1)
-
-    # Distribute remainder to highest-scoring branches.
-    used = sum(raw_alloc.values())
-    remaining = limit - used
-    while remaining > 0:
-        best_bid = max(branch_scores, key=branch_scores.get)
-        raw_alloc[best_bid] = raw_alloc.get(best_bid, 0) + 1
-        branch_scores[best_bid] = -1  # prevent re-selection
-        remaining -= 1
-
-    # Fill from each branch.
-    allocated: list = []
-    for bid in kept_branch_ids:
-        quota = raw_alloc.get(bid, 0)
-        branch_ranked = ranked_branches.get(bid, [])
-        allocated.extend(branch_ranked[:quota])
-
-    # Deduplicate (paranoia: a fact may appear under multiple branches).
-    seen: set[str] = set()
-    collected_facts = []
-    for n in allocated:
-        if n.id not in seen:
-            seen.add(n.id)
-            collected_facts.append(n)
-
-    logger.info(
-        "Traversal: %d kept branches, %d total facts → %d slots "
-        "(alloc: %s)",
-        n_branches, total_facts, len(collected_facts),
-        {bid: raw_alloc.get(bid, 0) for bid in kept_branch_ids},
-    )
-
-    # Format output.
+    # ── render: grouped by branch, with summaries ──
     lines: list[str] = []
-    for i, node in enumerate(collected_facts[:top_k]):
-        lines.append(f"[#{i + 1} | confidence: {node.confidence:.1f}]")
-        lines.append(node.content)
+    rendered_facts = 0
+    for bid, children in kept_tree.items():
+        if bid not in all_nodes:
+            continue
+        branch = all_nodes[bid]
+        label = branch.label or branch.content[:40]
+        summary = branch.summary or branch.content
+        lines.append(f"## {label}")
+        if summary:
+            lines.append(f"({summary})")
+        lines.append("")
+
+        # Separate child abstractions from leaf facts
+        child_abs = [(c.id, c) for c in children if c.kind == "abstraction" or c.level > 0]
+        child_facts = [c for c in children if c.kind != "abstraction" and c.level == 0]
+
+        # Render child abstractions as sub-sections
+        for cid, cnode in child_abs:
+            if budget > 0 and rendered_facts >= budget:
+                break
+            clabel = cnode.label or cnode.content[:40]
+            csummary = cnode.summary or cnode.content
+            lines.append(f"### {clabel}")
+            if csummary:
+                lines.append(f"({csummary})")
+            lines.append("")
+            # Facts under this child
+            sub_facts = [
+                n for n in kept_tree.get(cid, [])
+                if n.kind != "abstraction" and n.level == 0
+            ]
+            for f in sub_facts:
+                if budget > 0 and rendered_facts >= budget:
+                    break
+                lines.append(f"- {f.content}")
+                rendered_facts += 1
+            lines.append("")
+
+        # Render direct leaf facts
+        for f in child_facts:
+            if budget > 0 and rendered_facts >= budget:
+                break
+            lines.append(f"- {f.content}")
+            rendered_facts += 1
         lines.append("")
 
     if not lines:
         return "No matching facts found in traversal.", metrics
 
-    return "\n".join(lines), metrics
+    if metrics["budget_exceeded"]:
+        lines.append(
+            f"(Budget of {budget} facts exceeded. "
+            f"{total_facts} facts in region; showing {rendered_facts}. "
+            "Consider adding intermediate abstraction nodes.)"
+        )
+
+    return "\n".join(lines).rstrip("\n"), metrics

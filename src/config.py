@@ -148,4 +148,7 @@ MAX_TRAVERSAL_DEPTH: int = int(os.getenv("MAX_TRAVERSAL_DEPTH", "6"))
 MAX_BRANCHES_PER_LEVEL: int = int(os.getenv("MAX_BRANCHES_PER_LEVEL", "3"))
 
 # Maximum number of facts returned by traverse_recall.
-MAX_FACTS_RETURNED: int = int(os.getenv("MAX_FACTS_RETURNED", "30"))
+# This is a budget, not a relevance top-k — if the kept region exceeds it,
+# pruning continues deeper; if still too large, summaries + partial facts
+# are returned and the over-large-node condition is logged.
+MAX_RETURNED_FACTS: int = int(os.getenv("MAX_RETURNED_FACTS", "30"))

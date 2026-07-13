@@ -119,7 +119,10 @@ async def handle_list_tools() -> list[types.Tool]:
                     "top_k": {
                         "type": "integer",
                         "description": (
-                            "Maximum number of results to return (default: 5)."
+                            "For 'flat' method: maximum number of results "
+                            "(default: 5). For 'traverse' method: a budget -- "
+                            "the largest set of facts to return. The pruned "
+                            "region is returned unranked, grouped by branch."
                         ),
                         "default": 5,
                     },
@@ -208,7 +211,7 @@ async def _handle_recall(arguments: dict) -> list[types.TextContent]:
 
     try:
         if method == "traverse":
-            result_text, metrics = traverse_recall(query, graph, top_k)
+            result_text, metrics = traverse_recall(query, graph)
             logger.info(
                 "Traverse recall: %d layers, %d facts, %d kept/%d pruned",
                 metrics["layers_visited"], metrics["facts_collected"],
