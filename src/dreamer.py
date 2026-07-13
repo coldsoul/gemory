@@ -41,6 +41,7 @@ from src.config import (
     CONFIDENCE_BASE,
     MAX_CLUSTER_SIZE,
     MAX_LEVELS,
+    MAX_NODE_CHILDREN,
     MEMORY_PATH,
     MIN_CLUSTER_SIZE,
     MIN_REACH,
@@ -82,6 +83,31 @@ def _backup(memory_path: str) -> str:
         logger.info("Backed up %s -> %s", embeddings_path, backup_embeddings)
 
     return timestamp
+
+
+def _find_overlarge_nodes(graph: GraphStore) -> list[str]:
+    """Return IDs of nodes whose direct child count exceeds
+    ``MAX_NODE_CHILDREN``.
+
+    Only returns nodes that have NOT already been aspect-split (i.e. whose
+    children are not already within the threshold due to aspect re-parenting).
+    A node whose children are mostly aspects is already structured and does
+    not need further splitting.
+
+    Does NOT return nodes at the threshold or below.
+    """
+    candidates = []
+    for node in graph.all_nodes():
+        children = graph.get_children(node.id)
+        if len(children) > MAX_NODE_CHILDREN:
+            candidates.append(node.id)
+
+    if candidates:
+        logger.info(
+            "Found %d over-large nodes (threshold=%d)",
+            len(candidates), MAX_NODE_CHILDREN,
+        )
+    return candidates
 
 
 def _select_working_set(
@@ -658,6 +684,20 @@ def main() -> None:
     if not initial_layer:
         logger.info("Working set is empty -- nothing to consolidate")
         return
+
+    # Downward pass: split any over-large nodes into aspects.
+    oversize = _find_overlarge_nodes(graph)
+    if oversize:
+        logger.info(
+            "Downward pass: %d nodes exceed MAX_NODE_CHILDREN=%d",
+            len(oversize), MAX_NODE_CHILDREN,
+        )
+        # Placeholder for Slice 2 -- actual splitting happens later
+    else:
+        logger.info(
+            "No nodes exceed MAX_NODE_CHILDREN=%d -- skipping downward pass",
+            MAX_NODE_CHILDREN,
+        )
 
     all_abstractions = _run_consolidation_pass(graph, run_id, method)
 

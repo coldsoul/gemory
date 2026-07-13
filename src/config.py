@@ -97,6 +97,12 @@ ABSTRACTION_OVERLAP: float = float(os.getenv("ABSTRACTION_OVERLAP", "0.8"))
 # this is a hard stop to prevent runaway recursion.
 MAX_LEVELS: int = int(os.getenv("MAX_LEVELS", "10"))
 
+# A node is split (downward consolidation) when its direct child count
+# exceeds this threshold. Set below MAX_RETURNED_FACTS -- a node's children
+# should fit alongside other branches within the recall budget.
+# The current 24-fact topics are a reasonable calibration point.
+MAX_NODE_CHILDREN: int = int(os.getenv("MAX_NODE_CHILDREN", "20"))
+
 
 # ---------------------------------------------------------------------------
 # Topic tagging
