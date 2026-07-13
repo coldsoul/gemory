@@ -78,7 +78,6 @@ def recall(query: str, graph: GraphStore, top_k: int = 5) -> str:
 def traverse_recall(
     query: str,
     graph: GraphStore,
-    top_k: int | None = None,
 ) -> tuple[str, dict]:
     """Traversal-based recall: descend by parent_of, prune, return the
     surviving region grouped by branch with summaries attached.
@@ -88,14 +87,15 @@ def traverse_recall(
     ``facts_collected``, ``prune_decisions``, and ``budget_exceeded``.
 
     No ranking is applied — the caller (an LLM with conversational context)
-    is better positioned to rank.  *top_k* is a budget, not a relevance cut:
-    if exceeded, pruning continues deeper; if the graph bottom is reached and
-    the set is still too large, summaries + partial facts are returned and
-    the over-large-node condition is logged loudly.
+    is better positioned to rank.  The budget is controlled by
+    :data:`config.MAX_RETURNED_FACTS`: if the kept region exceeds it,
+    pruning continues deeper; if the graph bottom is reached and the set
+    is still too large, summaries + partial facts are returned and the
+    over-large-node condition is logged loudly.
     """
     from src.llm import prune_branches
 
-    budget = top_k if top_k is not None else cfg.MAX_RETURNED_FACTS
+    budget = cfg.MAX_RETURNED_FACTS
 
     metrics: dict = {
         "layers_visited": 0,

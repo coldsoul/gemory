@@ -66,7 +66,7 @@ class TestTraversalRecall:
             lambda q, c: [c[0]["id"], c[1]["id"]],
         )
 
-        text, metrics = traverse_recall("test query", store, top_k=20)
+        text, metrics = traverse_recall("test query", store)
 
         assert "## Topic A" in text
         assert "## Topic B" in text
@@ -85,7 +85,7 @@ class TestTraversalRecall:
             lambda q, c: [c[0]["id"]],  # Keep only root A
         )
 
-        text, metrics = traverse_recall("test", store, top_k=20)
+        text, metrics = traverse_recall("test", store)
         assert "Fact A0" in text
         assert "Fact A1" in text
         assert "Fact A2" in text
@@ -100,7 +100,7 @@ class TestTraversalRecall:
             lambda q, c: [],
         )
 
-        text, metrics = traverse_recall("test", store, top_k=20)
+        text, metrics = traverse_recall("test", store)
         assert "No matching facts" in text or metrics["branches_pruned"] > 0
 
     def test_budget_triggers_deeper_descent(self, traversal_graph, monkeypatch):
@@ -114,8 +114,9 @@ class TestTraversalRecall:
             return [item["id"] for item in c]
 
         monkeypatch.setattr("src.llm.prune_branches", counting_prune)
+        monkeypatch.setattr("src.recall.cfg.MAX_RETURNED_FACTS", 1)
 
-        text, metrics = traverse_recall("test", store, top_k=1)
+        text, metrics = traverse_recall("test", store)
         assert call_count[0] >= 1
 
     def test_budget_exhaustion_logged(self, traversal_graph, monkeypatch, caplog):
@@ -126,8 +127,9 @@ class TestTraversalRecall:
             "src.llm.prune_branches",
             lambda q, c: [item["id"] for item in c],
         )
+        monkeypatch.setattr("src.recall.cfg.MAX_RETURNED_FACTS", 1)
 
         caplog.set_level(logging.WARNING)
-        text, metrics = traverse_recall("test", store, top_k=1)
+        text, metrics = traverse_recall("test", store)
         assert metrics["budget_exceeded"] is True
         assert any("BUDGET EXCEEDED" in r.message for r in caplog.records)
