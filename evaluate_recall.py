@@ -36,6 +36,31 @@ def compute_coverage(expected_ids: list, returned_text: str) -> float:
     return found / len(expected_ids)
 
 
+def compute_prune_errors(
+    expected_roots: list[str],
+    prune_decisions: list[dict],
+) -> dict[int, dict]:
+    """Compute prune-error rate per level.
+
+    Returns a dict mapping layer index to {errors, total, kept, discarded}.
+    A prune error = the expected root was in the discarded set at that layer.
+    """
+    per_level = {}
+    for decision in prune_decisions:
+        layer = decision["layer"]
+        kept = set(decision.get("kept", []))
+        discarded = set(decision.get("discarded", []))
+        error = any(root in discarded for root in expected_roots)
+        per_level[layer] = {
+            "errors": 1 if error else 0,
+            "total": 1,
+            "kept": kept,
+            "discarded": discarded,
+            "expected_roots": expected_roots,
+        }
+    return per_level
+
+
 def main():
     data = load_queries()
     queries = data["queries"]
@@ -55,6 +80,7 @@ def main():
     print("-" * 110)
 
     type_results: dict = {}
+    per_level_errors: dict[int, dict] = {}  # layer → {errors, total}
 
     for q in queries:
         qid = q["id"]
@@ -92,6 +118,20 @@ def main():
             k=len(expected) if expected else 10,
         )
         trav_cov = compute_coverage(expected, trav_text)
+
+        # --- Per-level prune-error ---
+        expected_roots = q.get("expected_roots", [])
+        if expected_roots:
+            for decision in trav_metrics.get("prune_decisions", []):
+                layer = decision["layer"]
+                if layer not in per_level_errors:
+                    per_level_errors[layer] = {"errors": 0, "total": 0}
+                per_level_errors[layer]["total"] += 1
+                kept = set(decision.get("kept", []))
+                discarded = set(decision.get("discarded", []))
+                error = any(root in discarded for root in expected_roots)
+                if error:
+                    per_level_errors[layer]["errors"] += 1
 
         # --- Print row ---
         kept = trav_metrics.get("branches_kept", 0)
@@ -143,6 +183,20 @@ def main():
             f"{trav_pct:>9.0f}% "
             f"{trav_cov_pct:>9.0f}%"
         )
+
+    # --- Per-level prune-error rates ---
+    if per_level_errors:
+        print("\n--- Per-Level Prune-Error Rates (traversal only) ---")
+        print(f"{'Depth':>6} {'Errors':>7} {'Total':>7} {'Error Rate':>11}")
+        print("-" * 35)
+        for layer in sorted(per_level_errors.keys()):
+            pe = per_level_errors[layer]
+            rate = (pe["errors"] / pe["total"] * 100) if pe["total"] else 0
+            print(f"{layer:>6} {pe['errors']:>7} {pe['total']:>7} {rate:>10.0f}%")
+        print("\nInterpretation:")
+        print("  - Low rate at depth 0 (coarse: software vs person) = expected")
+        print("  - Rate increase at depth 1+ = subtler distinctions are harder")
+        print("  - If aspect-level distinctions (depth 2+) degrade: stop deepening")
 
 
 if __name__ == "__main__":
