@@ -28,6 +28,7 @@ def cluster_layer(
     node_ids: list[str],
     method: str = "algorithm",
     seed: int = 42,
+    context: str | None = None,
 ) -> list[set[str]]:
     """Cluster *node_ids* into groups.
 
@@ -43,6 +44,10 @@ def cluster_layer(
         leftovers).
     seed
         Random seed for deterministic algorithm clustering.
+    context
+        Optional context string describing the subject being partitioned (used
+        by LLM clustering to tune toward aspect finding rather than broad theme
+        identification).
 
     Returns
     -------
@@ -70,7 +75,7 @@ def cluster_layer(
         return _cluster_algorithm(graph, id_list, seed)
 
     elif method == "llm":
-        return _cluster_llm(gestalts, id_list)
+        return _cluster_llm(gestalts, id_list, context=context)
 
     elif method == "hybrid":
         # Run algorithm first.
@@ -88,7 +93,9 @@ def cluster_layer(
         for i, g in enumerate(leftover_gestalts):
             g["index"] = i
 
-        llm_clusters = _cluster_llm(leftover_gestalts, leftover_ids)
+        llm_clusters = _cluster_llm(
+            leftover_gestalts, leftover_ids, context=context,
+        )
         return algo_clusters + llm_clusters
 
     else:
@@ -108,6 +115,7 @@ def _cluster_algorithm(
 def _cluster_llm(
     gestalts: list[dict],
     id_list: list[str],
+    context: str | None = None,
 ) -> list[set[str]]:
     """LLM-based clustering over labels+summaries."""
     from src.llm import cluster_by_llm
@@ -124,7 +132,7 @@ def _cluster_llm(
     ]
 
     try:
-        raw_clusters = cluster_by_llm(llm_input)
+        raw_clusters = cluster_by_llm(llm_input, context=context)
     except Exception:
         logger.exception("LLM clustering failed, returning no clusters")
         return []

@@ -595,7 +595,32 @@ def _split_node(
     from src.consolidate import cluster_layer, summarize_layer
     from src.reach import compute_reach, update_reach
 
-    clusters = cluster_layer(graph, children, method="hybrid")
+    parent_node = graph.get_node(parent_id)
+    context = (
+        f"[{parent_node.label or parent_node.content[:40]}] "
+        f"{parent_node.summary or ''}"
+    )
+
+    clusters = cluster_layer(
+        graph, children, method="hybrid", context=context,
+    )
+
+    # If hybrid was too conservative, retry with LLM-only + context.
+    clustered_ids = set()
+    for c in clusters:
+        clustered_ids.update(c)
+    leftover_count = len(children) - len(clustered_ids)
+
+    if leftover_count > MAX_NODE_CHILDREN and context.strip():
+        logger.info(
+            "Hybrid clusterer grouped %d/%d children; %d leftovers exceed "
+            "threshold. Retrying with LLM-only + context...",
+            len(clustered_ids), len(children), leftover_count,
+        )
+        clusters = cluster_layer(
+            graph, children, method="llm", context=context,
+        )
+
     if not clusters:
         logger.info(
             "No meaningful clusters found within node %s -- nothing to split",
@@ -605,6 +630,9 @@ def _split_node(
 
     created_aspects: list[str] = []
     for cluster in clusters:
+        # Single-child guard: skip clusters with only one member.
+        if len(cluster) <= 1:
+            continue
         # Idempotency: check if an existing aspect (already a child of the
         # parent) substantially overlaps this cluster.
         existing_children = graph.get_children(parent_id)
@@ -874,6 +902,21 @@ def main() -> None:
         )
 
     all_abstractions = _run_consolidation_pass(graph, run_id, method)
+
+    # Final reach/level recomputation for ALL abstraction nodes.
+    backfill_reach(graph)
+    updated = 0
+    for node in graph.all_nodes():
+        if node.kind == "abstraction":
+            children = graph.get_children(node.id)
+            if children:
+                child_levels = [graph.get_node(cid).level for cid in children]
+                correct_level = max(child_levels) + 1
+                if correct_level != node.level:
+                    graph.set_node_attr(node.id, "level", correct_level)
+                    updated += 1
+    if updated:
+        logger.info("Recomputed level for %d abstraction nodes", updated)
 
     # Report / apply.
     if apply_mode:

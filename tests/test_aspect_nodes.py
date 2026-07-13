@@ -266,3 +266,46 @@ class TestIdempotency:
 
         oversize_after = _find_overlarge_nodes(store)
         assert topic_a not in oversize_after
+
+
+class TestLevelRecomputing:
+    def test_level_recomputed_after_splits(self, aspect_graph, monkeypatch):
+        """After splits, parent level updated to 1 + max(child)."""
+        store, topic_a, topic_b = aspect_graph
+
+        monkeypatch.setattr(
+            "src.consolidate.summarize_cluster",
+            lambda facts, **kw: {"label": "Group", "summary": "A group."},
+        )
+        monkeypatch.setattr("src.dreamer.embed", lambda x: [1.0, 0.0])
+
+        from src.dreamer import _split_node
+        _split_node(store, topic_a, "test_run")
+
+        topic_node = store.get_node(topic_a)
+        assert topic_node.level >= 2
+
+
+class TestNoOrphanEdges:
+    def test_reparent_moves_not_copies(self, aspect_graph, monkeypatch):
+        """After re-parenting, child has exactly one parent_of parent."""
+        store, topic_a, topic_b = aspect_graph
+
+        monkeypatch.setattr(
+            "src.consolidate.summarize_cluster",
+            lambda facts, **kw: {"label": "Group", "summary": "A group."},
+        )
+        monkeypatch.setattr("src.dreamer.embed", lambda x: [1.0, 0.0])
+
+        from src.dreamer import _split_node
+        _split_node(store, topic_a, "test_run")
+
+        for child_id in store.get_children(topic_a):
+            child = store.get_node(child_id)
+            if child.kind == "abstraction":
+                for grandchild in store.get_children(child_id):
+                    parents = store.get_parents(grandchild)
+                    assert len(parents) == 1, (
+                        f"Fact {grandchild} has {len(parents)} parents -- "
+                        f"should have exactly 1 after re-parenting"
+                    )
