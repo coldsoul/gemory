@@ -605,6 +605,33 @@ def _split_node(
 
     created_aspects: list[str] = []
     for cluster in clusters:
+        # Idempotency: check if an existing aspect (already a child of the
+        # parent) substantially overlaps this cluster.
+        existing_children = graph.get_children(parent_id)
+        skip_cluster = False
+        for child_id in existing_children:
+            child = graph.get_node(child_id)
+            if child.kind != "abstraction":
+                continue
+            existing_members = set(graph.get_children(child_id))
+            overlap = len(cluster & existing_members) / max(
+                len(cluster | existing_members), 1,
+            )
+            if overlap >= ABSTRACTION_OVERLAP:
+                # Attach any new members to the existing aspect.
+                new_members = cluster - existing_members
+                for mid in new_members:
+                    graph.add_parent_edge(child_id, mid)
+                skip_cluster = True
+                logger.info(
+                    "Aspect already exists for cluster (overlap=%.2f), "
+                    "attached %d new members",
+                    overlap, len(new_members),
+                )
+                break
+        if skip_cluster:
+            continue
+
         # Gate: only create aspect if union-reach clears MIN_REACH.
         reach = compute_reach(graph, list(cluster))
         if reach < MIN_REACH:
@@ -670,6 +697,10 @@ def _split_node(
         graph.add_parent_edge(parent_id, aspect_id)
         for child_id in cluster:
             graph.add_parent_edge(aspect_id, child_id)
+            # Remove the direct edge from parent to this child (if it exists),
+            # so the parent's direct child count decreases.
+            if graph._graph.has_edge(parent_id, child_id):
+                graph._graph.remove_edge(parent_id, child_id)
 
         update_reach(graph, aspect_id)
         created_aspects.append(aspect_id)
@@ -677,6 +708,26 @@ def _split_node(
             "Created aspect %s: %r (level=%d, %d children)",
             aspect_id[:8], label, aspect_level, len(cluster),
         )
+
+    if created_aspects:
+        # Recompute reach for the original parent (same leaves, one level deeper).
+        from src.reach import update_reach as _ur
+        _ur(graph, parent_id)
+
+        # Recompute level for the original parent if it is an abstraction.
+        parent_node = graph.get_node(parent_id)
+        if parent_node.kind == "abstraction":
+            child_levels = [
+                graph.get_node(cid).level
+                for cid in graph.get_children(parent_id)
+            ]
+            new_level = max(child_levels) + 1 if child_levels else parent_node.level
+            if new_level != parent_node.level:
+                graph.set_node_attr(parent_id, "level", new_level)
+                logger.info(
+                    "Updated parent %s level: %d -> %d",
+                    parent_id[:8], parent_node.level, new_level,
+                )
 
     return created_aspects
 
@@ -812,6 +863,10 @@ def main() -> None:
                     "Node %s split into %d aspects",
                     node_id[:8], len(created),
                 )
+        # Recompute reach for all abstraction nodes after splits.
+        backfilled = backfill_reach(graph)
+        if backfilled:
+            logger.info("Backfilled reach on %d nodes after downward pass", backfilled)
     else:
         logger.info(
             "No nodes exceed MAX_NODE_CHILDREN=%d -- skipping downward pass",
