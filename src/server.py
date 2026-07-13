@@ -119,7 +119,10 @@ async def handle_list_tools() -> list[types.Tool]:
                     "top_k": {
                         "type": "integer",
                         "description": (
-                            "Maximum number of results to return (default: 5)."
+                            "For 'flat' method: maximum number of results "
+                            "(default: 5). For 'traverse' method: a budget -- "
+                            "the largest set of facts to return. The pruned "
+                            "region is returned unranked, grouped by branch."
                         ),
                         "default": 5,
                     },
