@@ -117,32 +117,29 @@ def traverse_recall(
     frontier = roots
     depth = 0
 
-    # Track the tree of kept nodes: {kept_parent_id: [(child_node, depth), ...]}
-    # This is what we'll render at the end.
-    kept_tree: dict[str, list] = {}
+    # Track the tree of kept parent→children for rendering.
+    # {parent_id: {"node": Node, "children": [child_ids], "kept": bool}}
+    kept_tree: dict[str, dict] = {}
+    # Track which abstraction nodes were kept at each level (for rendering).
+    kept_abstraction_ids: set[str] = set()
 
     while frontier and depth < cfg.MAX_TRAVERSAL_DEPTH:
+        # Separate frontier into abstractions (need pruning) and
+        # facts / empty nodes (pass through untouched).
         abstractions: list = []
-        leaf_facts: list = []
+        pass_through: list[str] = []
         for nid in frontier:
             node = all_nodes[nid]
             if node.kind == "abstraction" or node.level > 0:
                 abstractions.append(node)
             else:
-                leaf_facts.append(node)
+                pass_through.append(nid)
 
-        # Collect leaf facts under their direct parents.
-        for fact in leaf_facts:
-            for pid in graph.get_parents(fact.id):
-                if pid not in kept_tree:
-                    kept_tree[pid] = []
-                kept_tree[pid].append(fact)
-                metrics["facts_collected"] += 1
-
+        # No abstractions left — all remaining frontier nodes are facts.
         if not abstractions:
             break
 
-        # Prune.
+        # Prune abstraction candidates.
         candidates = [
             {
                 "id": n.id,
@@ -178,122 +175,84 @@ def traverse_recall(
             )
             break
 
-        # Expand children of kept abstractions.
-        next_frontier: set[str] = set()
+        # Mark kept abstractions for rendering.
+        for kid in kept_ids:
+            kept_abstraction_ids.add(kid)
+            if kid not in kept_tree:
+                kept_tree[kid] = {"node": all_nodes[kid], "children": []}
+
+        # Expand: next frontier = pass-through facts + children of kept abstractions.
+        next_frontier: set[str] = set(pass_through)
         for kid in kept_ids:
             children = graph.get_children(kid)
             next_frontier.update(children)
-            # Record that this kept parent has children to explore.
-            if kid not in kept_tree:
-                kept_tree[kid] = []
+            kept_tree[kid]["children"].extend(children)
 
         frontier = list(next_frontier)
         depth += 1
         metrics["layers_visited"] = depth
 
-    # ── budget guard: if the kept region is too large, descend further ──
-    total_facts = sum(
-        sum(1 for n in nodes if n.level == 0)
-        for nodes in kept_tree.values()
+        # Budget-aware: if too many facts would be returned, prune deeper.
+        fact_count = sum(
+            sum(1 for cid in info.get("children", [])
+                if cid in all_nodes and all_nodes[cid].level == 0)
+            for info in kept_tree.values()
+        )
+        all_children = sum(len(info.get("children", [])) for info in kept_tree.values())
+        if fact_count > budget and all_children > 0:
+            continue  # The next iteration will prune deeper
+        elif fact_count == 0:
+            # No facts yet — continue descending
+            continue
+    # The frontier now contains only facts (no abstractions left to prune)
+    # or we broke out early.  Collect metrics.
+    metrics["facts_collected"] = sum(
+        sum(1 for cid in info.get("children", [])
+            if cid in all_nodes and all_nodes[cid].level == 0)
+        for info in kept_tree.values()
     )
-    while total_facts > budget and frontier and depth < cfg.MAX_TRAVERSAL_DEPTH:
-        # Budget exceeded — prune deeper.
-        abstractions = [all_nodes[nid] for nid in frontier
-                        if all_nodes[nid].kind == "abstraction" or all_nodes[nid].level > 0]
-        leaf_facts = [all_nodes[nid] for nid in frontier
-                      if all_nodes[nid].kind != "abstraction" and all_nodes[nid].level == 0]
-
-        for fact in leaf_facts:
-            for pid in graph.get_parents(fact.id):
-                if pid not in kept_tree:
-                    kept_tree[pid] = []
-                kept_tree[pid].append(fact)
-                metrics["facts_collected"] += 1
-
-        if not abstractions:
-            break
-
-        candidates = [
-            {"id": n.id, "label": n.label or n.content[:40],
-             "summary": n.summary or n.content, "reach": n.reach}
-            for n in abstractions
-        ]
-        try:
-            kept_ids = prune_branches(query, candidates)
-        except Exception:
-            kept_ids = [c["id"] for c in candidates]
-
-        if len(kept_ids) > cfg.MAX_BRANCHES_PER_LEVEL:
-            kept_ids = kept_ids[:cfg.MAX_BRANCHES_PER_LEVEL]
-
-        next_frontier = set()
-        for kid in kept_ids:
-            children = graph.get_children(kid)
-            next_frontier.update(children)
-            if kid not in kept_tree:
-                kept_tree[kid] = []
-
-        frontier = list(next_frontier)
-        depth += 1
-        metrics["layers_visited"] = depth
-        total_facts = sum(
-            sum(1 for n in nodes if n.level == 0)
-            for nodes in kept_tree.values()
-        )
-
-    if total_facts > budget:
-        metrics["budget_exceeded"] = True
-        logger.warning(
-            "BUDGET EXCEEDED: %d facts after %d layers (budget=%d). "
-            "Returning summaries + partial facts. An intermediate abstraction "
-            "node may be needed (dreamer: split over-large node).",
-            total_facts, depth, budget,
-        )
 
     # ── render: grouped by branch, with summaries ──
     lines: list[str] = []
     rendered_facts = 0
-    for bid, children in kept_tree.items():
+    for bid, info in kept_tree.items():
         if bid not in all_nodes:
             continue
-        branch = all_nodes[bid]
+        branch = info["node"]
         label = branch.label or branch.content[:40]
-        summary = branch.summary or branch.content
+        summary_text = branch.summary or branch.content
         lines.append(f"## {label}")
-        if summary:
-            lines.append(f"({summary})")
+        if summary_text:
+            lines.append(f"({summary_text})")
         lines.append("")
 
+        child_ids = info.get("children", [])
         # Separate child abstractions from leaf facts
-        child_abs = [(c.id, c) for c in children if c.kind == "abstraction" or c.level > 0]
-        child_facts = [c for c in children if c.kind != "abstraction" and c.level == 0]
+        child_abs = [(cid, all_nodes[cid]) for cid in child_ids
+                     if cid in all_nodes and (all_nodes[cid].kind == "abstraction" or all_nodes[cid].level > 0)]
+        child_facts = [all_nodes[cid] for cid in child_ids
+                       if cid in all_nodes and all_nodes[cid].kind != "abstraction" and all_nodes[cid].level == 0]
 
-        # Render child abstractions as sub-sections
+        # Render child abstractions as sub-sections (recursive)
         for cid, cnode in child_abs:
-            if budget > 0 and rendered_facts >= budget:
-                break
             clabel = cnode.label or cnode.content[:40]
             csummary = cnode.summary or cnode.content
             lines.append(f"### {clabel}")
             if csummary:
                 lines.append(f"({csummary})")
             lines.append("")
-            # Facts under this child
-            sub_facts = [
-                n for n in kept_tree.get(cid, [])
-                if n.kind != "abstraction" and n.level == 0
-            ]
-            for f in sub_facts:
-                if budget > 0 and rendered_facts >= budget:
-                    break
-                lines.append(f"- {f.content}")
-                rendered_facts += 1
+            # Facts under this child abstraction
+            sub_info = kept_tree.get(cid)
+            if sub_info:
+                sub_child_ids = sub_info.get("children", [])
+                for scid in sub_child_ids:
+                    if scid in all_nodes and all_nodes[scid].level == 0:
+                        lines.append(f"- {all_nodes[scid].content}")
+                        rendered_facts += 1
             lines.append("")
 
         # Render direct leaf facts
         for f in child_facts:
-            if budget > 0 and rendered_facts >= budget:
-                break
             lines.append(f"- {f.content}")
             rendered_facts += 1
         lines.append("")
@@ -301,7 +260,19 @@ def traverse_recall(
     if not lines:
         return "No matching facts found in traversal.", metrics
 
-    if metrics["budget_exceeded"]:
+    total_facts = sum(
+        sum(1 for cid in info.get("children", [])
+            if cid in all_nodes and all_nodes[cid].level == 0)
+        for info in kept_tree.values()
+    )
+    if total_facts > budget:
+        metrics["budget_exceeded"] = True
+        logger.warning(
+            "BUDGET EXCEEDED: %d facts after %d layers (budget=%d). "
+            "Returning summaries + partial facts. An intermediate abstraction "
+            "node may be needed (dreamer: split over-large node).",
+            total_facts, metrics["layers_visited"], budget,
+        )
         lines.append(
             f"(Budget of {budget} facts exceeded. "
             f"{total_facts} facts in region; showing {rendered_facts}. "
