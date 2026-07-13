@@ -47,26 +47,41 @@ def compute_coverage(expected_ids: list, returned_text: str, graph: GraphStore) 
 
 
 def compute_prune_errors(
+    expected_facts: list[str],
     expected_roots: list[str],
     prune_decisions: list[dict],
+    graph: GraphStore,
 ) -> dict[int, dict]:
-    """Compute prune-error rate per level.
+    """Compute prune-error rate per level using ancestor paths.
 
-    Returns a dict mapping layer index to {errors, total, kept, discarded}.
-    A prune error = the expected root was in the discarded set at that layer.
+    For each expected fact, walks parent_of upward to the root to build
+    the set of nodes that must survive at each layer.  A prune error at
+    layer *N* = any node on that expected path was discarded at layer *N*,
+    not just the root.
     """
+    # Build the ancestor path for each expected fact.
+    all_expected_nodes: set[str] = set()
+    for eid in expected_facts:
+        current = eid
+        while current:
+            try:
+                node = graph.get_node(current)
+            except KeyError:
+                break
+            all_expected_nodes.add(current)
+            parents = graph.get_parents(current)
+            current = parents[0] if parents else None
+
     per_level = {}
     for decision in prune_decisions:
         layer = decision["layer"]
         kept = set(decision.get("kept", []))
         discarded = set(decision.get("discarded", []))
-        error = any(root in discarded for root in expected_roots)
+        # Error: any expected-path node was discarded at this layer.
+        error = bool(discarded & all_expected_nodes)
         per_level[layer] = {
-            "errors": 1 if error else 0,
-            "total": 1,
-            "kept": kept,
-            "discarded": discarded,
-            "expected_roots": expected_roots,
+            "errors": per_level.get(layer, {}).get("errors", 0) + (1 if error else 0),
+            "total": per_level.get(layer, {}).get("total", 0) + 1,
         }
     return per_level
 
@@ -109,7 +124,7 @@ def main():
     header = (
         f"{'Query':<6} {'Type':<14} {'Flat Hit@10':>12} "
         f"{'Flat+Sum Hit@10':>17} {'Trav Hit@n':>12} "
-        f"{'Trav Cov':>9} {'Trav Layers':>11} {'Trav Kept/Pruned':>17}"
+        f"{'Trav Cov':>9} {'Total Prune':>11} {'Trav Kept/Pruned':>17}"
     )
     print(header)
     print("-" * 110)
@@ -151,19 +166,23 @@ def main():
         trav_hit = compute_hit_k(expected, trav_text, graph)
         trav_cov = compute_coverage(expected, trav_text, graph)
 
-        # --- Per-level prune-error ---
+        # --- Per-level prune-error (using full ancestor paths) ---
         expected_roots = q.get("expected_roots", [])
-        if expected_roots:
-            for decision in trav_metrics.get("prune_decisions", []):
-                layer = decision["layer"]
+        if expected or expected_roots:
+            pe = compute_prune_errors(expected, expected_roots,
+                                      trav_metrics.get("prune_decisions", []), graph)
+            for layer, info in pe.items():
                 if layer not in per_level_errors:
                     per_level_errors[layer] = {"errors": 0, "total": 0}
-                per_level_errors[layer]["total"] += 1
-                kept = set(decision.get("kept", []))
-                discarded = set(decision.get("discarded", []))
-                error = any(root in discarded for root in expected_roots)
-                if error:
-                    per_level_errors[layer]["errors"] += 1
+                per_level_errors[layer]["errors"] += info["errors"]
+                per_level_errors[layer]["total"] += info["total"]
+
+        # --- Detect total prunes ---
+        total_prune_layers = [
+            d["layer"] for d in trav_metrics.get("prune_decisions", [])
+            if not d.get("kept")
+        ]
+        total_prune_flag = ",".join(str(x) for x in total_prune_layers) if total_prune_layers else "-"
 
         # --- Print row ---
         kept = trav_metrics.get("branches_kept", 0)
@@ -175,7 +194,7 @@ def main():
             f"{flat_sum_hit:>14}/{len(expected):<2} "
             f"{trav_hit:>9}/{len(expected):<2} "
             f"{trav_cov:>8.2f} "
-            f"{layers:>10} "
+            f"{total_prune_flag:>11} "
             f"{kept:>2}/{pruned:<2}"
         )
 

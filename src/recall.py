@@ -169,10 +169,22 @@ def traverse_recall(
         })
 
         if not kept_ids:
-            logger.warning(
-                "TOTAL PRUNE at depth %d -- all %d branches discarded. Query: %r",
-                depth, len(candidates), query[:80],
-            )
+            # A total prune with direct facts in the frontier is a valid
+            # "stop descending" signal — the answer may be among those direct
+            # facts. Only a total prune at the root layer with nothing to fall
+            # back on is a genuine failure.
+            if pass_through:
+                logger.info(
+                    "Pruned all %d abstraction branches at depth %d — "
+                    "%d direct facts remain in frontier. Query: %r",
+                    len(candidates), depth, len(pass_through), query[:80],
+                )
+            else:
+                logger.warning(
+                    "TOTAL PRUNE at depth %d -- all %d branches discarded "
+                    "with no direct facts. Query: %r",
+                    depth, len(candidates), query[:80],
+                )
             break
 
         # Mark kept abstractions for rendering.
