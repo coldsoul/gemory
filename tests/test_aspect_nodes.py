@@ -187,3 +187,82 @@ class TestDownwardSplit:
         from src.dreamer import _split_node
         created = _split_node(store, parent, "test_run")
         assert created == []  # Vetoed
+
+
+class TestReachAndLevel:
+    """Reach and level recomputation after split."""
+
+    def test_split_preserves_reach(self, aspect_graph, monkeypatch):
+        """Original node's reach unchanged after split (same leaves)."""
+        store, topic_a, topic_b = aspect_graph
+        from src.reach import compute_reach
+
+        reach_before = compute_reach(store, [topic_a])
+        assert reach_before == 25
+
+        monkeypatch.setattr(
+            "src.consolidate.summarize_cluster",
+            lambda facts, **kw: {"label": "Group", "summary": "A group."},
+        )
+        monkeypatch.setattr("src.dreamer.embed", lambda x: [1.0, 0.0])
+
+        from src.dreamer import _split_node
+        _split_node(store, topic_a, "test_run")
+
+        reach_after = compute_reach(store, [topic_a])
+        assert reach_after == 25  # Same leaves, unchanged
+
+    def test_aspect_level_is_computed(self, aspect_graph, monkeypatch):
+        """Aspect's level = 1 + max(child levels)."""
+        store, topic_a, topic_b = aspect_graph
+
+        monkeypatch.setattr(
+            "src.consolidate.summarize_cluster",
+            lambda facts, **kw: {"label": "Group", "summary": "A group."},
+        )
+        monkeypatch.setattr("src.dreamer.embed", lambda x: [1.0, 0.0])
+
+        from src.dreamer import _split_node
+        _split_node(store, topic_a, "test_run")
+
+        for child_id in store.get_children(topic_a):
+            child = store.get_node(child_id)
+            if child.kind == "abstraction":
+                assert child.level >= 1
+                for grandchild in store.get_children(child_id):
+                    assert store.get_node(grandchild).level == 0
+
+
+class TestIdempotency:
+    """Re-running _split_node does not duplicate aspects."""
+
+    def test_rerun_does_not_duplicate_aspects(self, aspect_graph, monkeypatch):
+        store, topic_a, topic_b = aspect_graph
+
+        monkeypatch.setattr(
+            "src.consolidate.summarize_cluster",
+            lambda facts, **kw: {"label": "Group", "summary": "A group."},
+        )
+        monkeypatch.setattr("src.dreamer.embed", lambda x: [1.0, 0.0])
+
+        from src.dreamer import _split_node
+        first_run = _split_node(store, topic_a, "run1")
+        second_run = _split_node(store, topic_a, "run2")
+
+        assert len(second_run) == 0  # No new aspects on re-run
+
+    def test_already_split_node_not_re_split(self, aspect_graph, monkeypatch):
+        """A node whose children are within threshold after split is not re-split."""
+        store, topic_a, topic_b = aspect_graph
+
+        monkeypatch.setattr(
+            "src.consolidate.summarize_cluster",
+            lambda facts, **kw: {"label": "Group", "summary": "A group."},
+        )
+        monkeypatch.setattr("src.dreamer.embed", lambda x: [1.0, 0.0])
+
+        from src.dreamer import _find_overlarge_nodes, _split_node
+        _split_node(store, topic_a, "run1")
+
+        oversize_after = _find_overlarge_nodes(store)
+        assert topic_a not in oversize_after
