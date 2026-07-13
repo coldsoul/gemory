@@ -568,6 +568,119 @@ def _lift_relations(
     return lifted
 
 
+def _split_node(
+    graph: GraphStore,
+    parent_id: str,
+    run_id: str,
+) -> list[str]:
+    """Split an over-large node into aspect sub-nodes.
+
+    Reuses the existing consolidation pipeline (cluster -> gate ->
+    summarize -> re-parent), pointed downward at *parent_id*'s direct
+    children rather than upward at the topic layer.
+
+    Returns the IDs of created aspect nodes.
+    """
+    children = graph.get_children(parent_id)
+    if len(children) <= MAX_NODE_CHILDREN:
+        return []
+
+    logger.info(
+        "Splitting node %s (%s): %d children exceed threshold %d",
+        parent_id[:8],
+        (graph.get_node(parent_id).label or graph.get_node(parent_id).content[:30]),
+        len(children), MAX_NODE_CHILDREN,
+    )
+
+    from src.consolidate import cluster_layer, summarize_layer
+    from src.reach import compute_reach, update_reach
+
+    clusters = cluster_layer(graph, children, method="hybrid")
+    if not clusters:
+        logger.info(
+            "No meaningful clusters found within node %s -- nothing to split",
+            parent_id[:8],
+        )
+        return []
+
+    created_aspects: list[str] = []
+    for cluster in clusters:
+        # Gate: only create aspect if union-reach clears MIN_REACH.
+        reach = compute_reach(graph, list(cluster))
+        if reach < MIN_REACH:
+            logger.info(
+                "Skipping aspect cluster: reach=%d < MIN_REACH=%d",
+                reach, MIN_REACH,
+            )
+            continue
+
+        # Summarize -- children are facts here, so summarize_layer receives
+        # their raw texts (compound-upward contract).
+        try:
+            summary_result = summarize_layer(graph, cluster)
+        except Exception:
+            logger.exception(
+                "Summarization failed for aspect cluster, skipping",
+            )
+            continue
+
+        # Non-theme veto (same guards as upward consolidation).
+        summary_text = summary_result.get("summary", "").lower()
+        label_text = summary_result.get("label", "").lower()
+        combined = f"{label_text} {summary_text}"
+        veto_phrases = [
+            "no common theme", "no strong theme", "miscellaneous facts",
+            "no clear theme", "unrelated", "without a clear",
+            "not a coherent", "no coherent", "miscellaneous",
+        ]
+        if any(p in combined for p in veto_phrases):
+            logger.info("Vetoing aspect: non-theme result")
+            continue
+
+        label = summary_result.get("label", "Aspect")
+        summary_text = summary_result.get("summary", "")
+
+        # Embed the aspect.
+        try:
+            embedding = embed(f"{label}. {summary_text}")
+        except Exception:
+            embedding = [0.0]  # fallback
+
+        # Determine level: 1 + max(child level).
+        child_levels = [graph.get_node(cid).level for cid in cluster]
+        aspect_level = max(child_levels) + 1 if child_levels else 1
+
+        # Create the aspect node (ordinary abstraction).
+        aspect_id = graph.add_node(
+            content=label,
+            embedding=embedding,
+            provenance={
+                "source_id": f"dreamer:{run_id}",
+                "label": label,
+                "timestamp": _now_iso(),
+                "member_ids": list(cluster),
+            },
+            kind="abstraction",
+            label=label,
+            summary=summary_text,
+        )
+        graph.set_node_attr(aspect_id, "level", aspect_level)
+
+        # Re-parent: original node -> aspect -> children.
+        graph.add_parent_edge(parent_id, aspect_id)
+        for child_id in cluster:
+            graph.add_parent_edge(aspect_id, child_id)
+
+        update_reach(graph, aspect_id)
+        created_aspects.append(aspect_id)
+        logger.info(
+            "Created aspect %s: %r (level=%d, %d children)",
+            aspect_id[:8], label, aspect_level, len(cluster),
+        )
+
+    return created_aspects
+
+
 def _print_dry_run_report(
     all_abstractions: list[dict],
     graph: GraphStore,
@@ -692,7 +805,13 @@ def main() -> None:
             "Downward pass: %d nodes exceed MAX_NODE_CHILDREN=%d",
             len(oversize), MAX_NODE_CHILDREN,
         )
-        # Placeholder for Slice 2 -- actual splitting happens later
+        for node_id in oversize:
+            created = _split_node(graph, node_id, run_id)
+            if created:
+                logger.info(
+                    "Node %s split into %d aspects",
+                    node_id[:8], len(created),
+                )
     else:
         logger.info(
             "No nodes exceed MAX_NODE_CHILDREN=%d -- skipping downward pass",
