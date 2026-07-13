@@ -113,7 +113,7 @@ def traverse_recall(
     )
 
     frontier = roots
-    collected_facts: list = []
+    branch_facts: dict[str, list] = {}  # kept branch ID → list of leaf facts under it
     depth = 0
 
     while frontier and depth < cfg.MAX_TRAVERSAL_DEPTH:
@@ -126,7 +126,14 @@ def traverse_recall(
             else:
                 leaf_facts.append(node)
 
-        collected_facts.extend(leaf_facts)
+        # Collect leaf facts — tag them under their parent branch
+        for fact in leaf_facts:
+            parents = graph.get_parents(fact.id)
+            for pid in parents:
+                if pid not in branch_facts:
+                    branch_facts[pid] = []
+                branch_facts[pid].append(fact)
+
         metrics["facts_collected"] += len(leaf_facts)
 
         if not abstractions:
@@ -178,32 +185,99 @@ def traverse_recall(
         depth += 1
         metrics["layers_visited"] = depth
 
-    # Fallback if nothing collected from traversal.
-    if not collected_facts and depth > 0:
+    # Collect all facts from kept branches
+    kept_branch_ids = list(branch_facts.keys())
+    total_facts = sum(len(v) for v in branch_facts.values())
+    if not total_facts and depth > 0:
         return (
             "Traversal found no matching facts. "
             f"(Visited {depth} layers, pruned {metrics['branches_pruned']} branches.)",
             metrics,
         )
 
-    # Rank collected facts by cosine similarity to query.
-    if collected_facts and top_k > 0:
-        query_emb = llm.embed(query)
-        scored: list[tuple[float, str]] = []
-        for node in collected_facts:
-            emb = graph._embeddings.get(node.id)
-            if emb:
-                qn = np.linalg.norm(query_emb)
-                en = np.linalg.norm(emb)
-                if qn > 0 and en > 0:
-                    sim = float(np.dot(
-                        np.array(query_emb) / qn,
-                        np.array(emb) / en,
-                    ))
-                    scored.append((sim, node.id))
+    # Per-branch ranking: allocate result slots so a large subtree
+    # cannot drown a small one. The pruner decided all kept branches
+    # are relevant — the ranker must not silently un-decide that.
+    query_emb = llm.embed(query)
+    qn = np.linalg.norm(query_emb)
+
+    def _score(node) -> float:
+        emb = graph._embeddings.get(node.id)
+        if not emb:
+            return 0.0
+        en = np.linalg.norm(emb)
+        if qn == 0 or en == 0:
+            return 0.0
+        return float(np.dot(np.array(query_emb) / qn, np.array(emb) / en))
+
+    # Rank facts within each branch
+    ranked_branches: dict[str, list] = {}
+    for bid, facts in branch_facts.items():
+        scored = [(_score(f), f) for f in facts]
         scored.sort(key=lambda x: x[0], reverse=True)
-        top_ids = {nid for _, nid in scored[:min(top_k, cfg.MAX_FACTS_RETURNED)]}
-        collected_facts = [graph.get_node(nid) for nid in top_ids]
+        ranked_branches[bid] = [f for _, f in scored]
+
+    # Allocate slots per branch proportional to relevance.
+    # A branch's relevance = the mean of its top-3 cosine scores
+    # (so a branch with a single strong signal isn't drowned).
+    n_branches = len(kept_branch_ids)
+    if n_branches == 0:
+        return "No matching facts found in traversal.", metrics
+
+    limit = min(top_k, cfg.MAX_FACTS_RETURNED)
+
+    branch_scores: dict[str, float] = {}
+    for bid in kept_branch_ids:
+        ranked = ranked_branches.get(bid, [])
+        if ranked:
+            top3 = [_score(n) for n in ranked[:3]]
+            branch_scores[bid] = sum(top3) / len(top3)
+        else:
+            branch_scores[bid] = 0.0
+
+    total_weight = sum(branch_scores.values())
+    if total_weight > 0:
+        raw_alloc = {bid: int(limit * s / total_weight) for bid, s in branch_scores.items()}
+    else:
+        raw_alloc = {bid: limit // n_branches for bid in kept_branch_ids}
+
+    # Cap: no branch gets more than 60% of slots, and at least 1 if it has facts.
+    max_cap = max(1, int(limit * 0.6))
+    for bid in kept_branch_ids:
+        if branch_scores[bid] > 0:
+            raw_alloc[bid] = min(raw_alloc.get(bid, 0), max_cap)
+            raw_alloc[bid] = max(raw_alloc.get(bid, 0), 1)
+
+    # Distribute remainder to highest-scoring branches.
+    used = sum(raw_alloc.values())
+    remaining = limit - used
+    while remaining > 0:
+        best_bid = max(branch_scores, key=branch_scores.get)
+        raw_alloc[best_bid] = raw_alloc.get(best_bid, 0) + 1
+        branch_scores[best_bid] = -1  # prevent re-selection
+        remaining -= 1
+
+    # Fill from each branch.
+    allocated: list = []
+    for bid in kept_branch_ids:
+        quota = raw_alloc.get(bid, 0)
+        branch_ranked = ranked_branches.get(bid, [])
+        allocated.extend(branch_ranked[:quota])
+
+    # Deduplicate (paranoia: a fact may appear under multiple branches).
+    seen: set[str] = set()
+    collected_facts = []
+    for n in allocated:
+        if n.id not in seen:
+            seen.add(n.id)
+            collected_facts.append(n)
+
+    logger.info(
+        "Traversal: %d kept branches, %d total facts → %d slots "
+        "(alloc: %s)",
+        n_branches, total_facts, len(collected_facts),
+        {bid: raw_alloc.get(bid, 0) for bid in kept_branch_ids},
+    )
 
     # Format output.
     lines: list[str] = []
