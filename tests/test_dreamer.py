@@ -529,13 +529,13 @@ class TestDiffDryRun:
         """Diff mode returns agreement/algorithm_only/llm_only dicts."""
         from src import dreamer as dr
 
-        def stub_cluster(summaries):
+        def stub_cluster(summaries, **kw):
             # Return first 5 nodes as one cluster (matches algorithm result)
             indices = list(range(min(5, len(summaries))))
             return [set(indices)] if len(indices) >= 2 else []
 
         monkeypatch.setattr("src.consolidate.summarize_cluster",
-                            lambda f: {"label": "Test", "summary": "Sum."})
+                            lambda f, **kw: {"label": "Test", "summary": "Sum."})
         monkeypatch.setattr(dr, "embed", lambda x: [1.0, 0.0])
         # The algorithm path doesn't use cluster_by_llm; LLM path does.
         monkeypatch.setattr("src.llm.cluster_by_llm", stub_cluster)
@@ -555,9 +555,9 @@ class TestDiffDryRun:
         from src import dreamer as dr
 
         monkeypatch.setattr("src.consolidate.summarize_cluster",
-                            lambda f: {"label": "T", "summary": "S."})
+                            lambda f, **kw: {"label": "T", "summary": "S."})
         monkeypatch.setattr(dr, "embed", lambda x: [1.0, 0.0])
-        monkeypatch.setattr("src.llm.cluster_by_llm", lambda x: [])
+        monkeypatch.setattr("src.llm.cluster_by_llm", lambda x, **kw: [])
 
         store, _ = small_graph
         diff = dr._diff_consolidation(store, "test-diff")
@@ -627,7 +627,7 @@ class TestProfileTheme:
             assert compute_reach(store, [topics[attr_name]]) == 2
 
         # Stub LLM clusterer: group the 3 attribute topics together.
-        def stub_cluster(summaries):
+        def stub_cluster(summaries, **kw):
             attr_indices = [
                 s["index"] for s in summaries
                 if s.get("label") in attributes

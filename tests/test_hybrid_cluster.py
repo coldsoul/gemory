@@ -65,7 +65,7 @@ class TestLLMClustering:
         store, ids = hybrid_graph
         called: list = []
 
-        def stub_cluster(summaries):
+        def stub_cluster(summaries, **kw):
             called.append(summaries)
             return [{0, 1}]  # Cluster first two nodes
 
@@ -87,7 +87,7 @@ class TestHybridClustering:
 
         llm_called: list = []
 
-        def stub_cluster(summaries):
+        def stub_cluster(summaries, **kw):
             llm_called.append(summaries)
             # Cluster whatever leftovers the LLM receives
             return [{0, 1}] if len(summaries) >= 2 else []
@@ -107,7 +107,7 @@ class TestHybridClustering:
         llm_called: list = []
         monkeypatch.setattr(
             "src.llm.cluster_by_llm",
-            lambda x: llm_called.append(x) or [],
+            lambda x, **kw: llm_called.append(x) or [],
         )
         clusters = cluster_layer(store, similar_ids, method="hybrid")
         assert len(clusters) >= 1

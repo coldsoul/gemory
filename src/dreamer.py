@@ -184,28 +184,53 @@ def _create_abstraction(
     member_ids = list(cluster)
     member_nodes = [graph.get_node(mid) for mid in member_ids]
 
-    # Check for existing overlapping abstraction.
-    for existing in existing_abstractions:
-        existing_members = set(existing["member_ids"])
-        overlap = len(cluster & existing_members) / max(
-            len(cluster | existing_members), 1,
+    # Check for existing overlapping abstraction — first from this run
+    # (in-memory list), then from the graph (abstractions from prior runs).
+    def _check_overlap(ea_members: set, ea_id: str) -> str | None:
+        if not cluster or not ea_members:
+            return None
+        overlap = len(cluster & ea_members) / max(
+            len(cluster | ea_members), 1,
         )
         if overlap >= ABSTRACTION_OVERLAP:
-            abs_id = existing["id"]
-            new_members = cluster - existing_members
+            return ea_id
+        return None
+
+    for existing in existing_abstractions:
+        ea_id = existing["id"]
+        ea_members = set(existing["member_ids"])
+        found = _check_overlap(ea_members, ea_id)
+        if found:
+            new_members = cluster - ea_members
             if new_members:
                 for mid in new_members:
-                    graph.add_parent_edge(abs_id, mid)
-                logger.info(
-                    "Updated abstraction %s: attached %d new members",
-                    abs_id[:8], len(new_members),
-                )
+                    graph.add_parent_edge(found, mid)
+                logger.info("Updated abstraction %s: attached %d new members",
+                            found[:8], len(new_members))
             else:
-                logger.info(
-                    "Abstraction %s already covers this cluster, skipping",
-                    abs_id[:8],
-                )
-            return abs_id
+                logger.info("Abstraction %s already covers this cluster, skipping",
+                            found[:8])
+            return found
+
+    # Also check graph for abstractions from prior runs.
+    for node in graph.all_nodes():
+        if node.kind != "abstraction":
+            continue
+        # An abstraction from a prior run may not be in existing_abstractions.
+        # Check its children (parent_of edges) as the member set.
+        children = set(graph.get_children(node.id))
+        found = _check_overlap(children, node.id)
+        if found:
+            new_members = cluster - children
+            if new_members:
+                for mid in new_members:
+                    graph.add_parent_edge(found, mid)
+                logger.info("Updated existing abstraction %s: attached %d new members",
+                            found[:8], len(new_members))
+            else:
+                logger.info("Existing abstraction %s already covers this cluster, skipping",
+                            found[:8])
+            return found
 
     # Create new abstraction.
     if summary_result:
@@ -291,6 +316,10 @@ def _consolidate_layer(
                 "Skipping cluster of size %d: reach=%d < MIN_REACH=%d",
                 len(cluster), reach, MIN_REACH,
             )
+            continue
+
+        # Single-child abstractions add depth without value.
+        if len(cluster) <= 1:
             continue
 
         # Pre-check: summarize the cluster and veto non-theme results.
@@ -595,7 +624,32 @@ def _split_node(
     from src.consolidate import cluster_layer, summarize_layer
     from src.reach import compute_reach, update_reach
 
-    clusters = cluster_layer(graph, children, method="hybrid")
+    parent_node = graph.get_node(parent_id)
+    context = (
+        f"[{parent_node.label or parent_node.content[:40]}] "
+        f"{parent_node.summary or ''}"
+    )
+
+    clusters = cluster_layer(
+        graph, children, method="hybrid", context=context,
+    )
+
+    # If hybrid was too conservative, retry with LLM-only + context.
+    clustered_ids = set()
+    for c in clusters:
+        clustered_ids.update(c)
+    leftover_count = len(children) - len(clustered_ids)
+
+    if leftover_count > MAX_NODE_CHILDREN and context.strip():
+        logger.info(
+            "Hybrid clusterer grouped %d/%d children; %d leftovers exceed "
+            "threshold. Retrying with LLM-only + context...",
+            len(clustered_ids), len(children), leftover_count,
+        )
+        clusters = cluster_layer(
+            graph, children, method="llm", context=context,
+        )
+
     if not clusters:
         logger.info(
             "No meaningful clusters found within node %s -- nothing to split",
@@ -605,6 +659,9 @@ def _split_node(
 
     created_aspects: list[str] = []
     for cluster in clusters:
+        # Single-child guard: skip clusters with only one member.
+        if len(cluster) <= 1:
+            continue
         # Idempotency: check if an existing aspect (already a child of the
         # parent) substantially overlaps this cluster.
         existing_children = graph.get_children(parent_id)
@@ -874,6 +931,21 @@ def main() -> None:
         )
 
     all_abstractions = _run_consolidation_pass(graph, run_id, method)
+
+    # Final reach/level recomputation for ALL abstraction nodes.
+    backfill_reach(graph)
+    updated = 0
+    for node in graph.all_nodes():
+        if node.kind == "abstraction":
+            children = graph.get_children(node.id)
+            if children:
+                child_levels = [graph.get_node(cid).level for cid in children]
+                correct_level = max(child_levels) + 1
+                if correct_level != node.level:
+                    graph.set_node_attr(node.id, "level", correct_level)
+                    updated += 1
+    if updated:
+        logger.info("Recomputed level for %d abstraction nodes", updated)
 
     # Report / apply.
     if apply_mode:

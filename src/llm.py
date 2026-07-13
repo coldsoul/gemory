@@ -488,13 +488,19 @@ def _parse_summarize_response(content: str) -> dict[str, str]:
 # LLM clustering
 # ---------------------------------------------------------------------------
 
-def cluster_by_llm(node_summaries: list[dict[str, str]]) -> list[set[int]]:
+def cluster_by_llm(
+    node_summaries: list[dict[str, str]],
+    context: str | None = None,
+) -> list[set[int]]:
     """Ask the LLM to group nodes into thematic clusters.
 
     *node_summaries* is a list of dicts with keys:
       - ``"index"``: integer position (0-based, for output mapping)
       - ``"label"``: short label of the node
       - ``"summary"``: summary/content of the node
+
+    *context*, when provided, is a description of the subject being partitioned
+    (used during downward splitting to tune toward aspect finding).
 
     Returns a list of clusters, each a set of indices into *node_summaries*.
     Nodes not grouped are not included in any cluster.
@@ -507,18 +513,35 @@ def cluster_by_llm(node_summaries: list[dict[str, str]]) -> list[set[int]]:
         lines.append(f"{item['index']}: [{item['label']}] {item['summary']}")
     input_text = "\n".join(lines)
 
-    prompt = (
-        "You are a knowledge organizer. You are given a list of items, each with "
-        "a label and a short summary. Your job is to group items that belong "
-        "together into thematic clusters.\n"
-        "\n"
-        "Output ONLY a JSON array of arrays of integers. Each inner array "
-        "contains the indices of items that form one cluster. Items that do not "
-        "belong to any cluster should not appear in any group.\n"
-        "\n"
-        "Rules:\n"
-        "- Group items that share a common theme, subject, or category -- they\n"
-        "  must be the SAME KIND OF THING.\n"
+    if context:
+        prompt = (
+            "You are a knowledge organizer. Your task is to partition facts "
+            "about a SINGLE KNOWN SUBJECT into its aspects (sub-topics). "
+            f"The subject is: {context}\n"
+            "\n"
+            "This is DIFFERENT from broad theme clustering. The facts are all "
+            "about one subject and DO have real internal structure. Finding "
+            "several aspects is the EXPECTED outcome. However: do NOT create a "
+            "'Miscellaneous' catch-all; genuinely unrelated facts should remain "
+            "ungrouped.\n"
+            "\n"
+            "Output ONLY a JSON array of arrays of integers. Each inner array "
+            "contains the indices of items that form one aspect. Items that do "
+            "not belong to any aspect should not appear in any group.\n"
+        )
+    else:
+        prompt = (
+            "You are a knowledge organizer. You are given a list of items, each with "
+            "a label and a short summary. Your job is to group items that belong "
+            "together into thematic clusters.\n"
+            "\n"
+            "Output ONLY a JSON array of arrays of integers. Each inner array "
+            "contains the indices of items that form one cluster. Items that do not "
+            "belong to any cluster should not appear in any group.\n"
+            "\n"
+            "Rules:\n"
+            "- Group items that share a common theme, subject, or category -- they\n"
+            "  must be the SAME KIND OF THING.\n"
         "- Do NOT force items together if they are genuinely unrelated.\n"
         "- Most sets of items do NOT share a theme. If the items are genuinely\n"
         "  unrelated, return [] (empty array). This is the CORRECT answer for\n"
