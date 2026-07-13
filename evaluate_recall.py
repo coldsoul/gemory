@@ -19,44 +19,69 @@ def load_queries():
         return json.load(f)
 
 
-def compute_hit_k(expected_ids: list, returned_text: str, k: int = 10) -> int:
-    """Count how many expected fact IDs appear in the returned text."""
+def compute_hit_k(expected_ids: list, returned_text: str, graph: GraphStore) -> int:
+    """Count how many expected facts (by content) appear in the returned text."""
     found = 0
     for eid in expected_ids:
-        if eid in returned_text:
-            found += 1
+        try:
+            content = graph.get_node(eid).content
+            if content in returned_text:
+                found += 1
+        except KeyError:
+            print(f"WARNING: expected fact ID {eid!r} not found in graph", file=sys.stderr)
     return found
 
 
-def compute_coverage(expected_ids: list, returned_text: str) -> float:
-    """Fraction of expected facts present in the returned text."""
+def compute_coverage(expected_ids: list, returned_text: str, graph: GraphStore) -> float:
+    """Fraction of expected facts (by content) present in the returned text."""
     if not expected_ids:
         return 1.0
-    found = sum(1 for eid in expected_ids if eid in returned_text)
+    found = 0
+    for eid in expected_ids:
+        try:
+            if graph.get_node(eid).content in returned_text:
+                found += 1
+        except KeyError:
+            print(f"WARNING: expected fact ID {eid!r} not found in graph", file=sys.stderr)
     return found / len(expected_ids)
 
 
 def compute_prune_errors(
+    expected_facts: list[str],
     expected_roots: list[str],
     prune_decisions: list[dict],
+    graph: GraphStore,
 ) -> dict[int, dict]:
-    """Compute prune-error rate per level.
+    """Compute prune-error rate per level using ancestor paths.
 
-    Returns a dict mapping layer index to {errors, total, kept, discarded}.
-    A prune error = the expected root was in the discarded set at that layer.
+    For each expected fact, walks parent_of upward to the root to build
+    the set of nodes that must survive at each layer.  A prune error at
+    layer *N* = any node on that expected path was discarded at layer *N*,
+    not just the root.
     """
+    # Build the ancestor path for each expected fact.
+    all_expected_nodes: set[str] = set()
+    for eid in expected_facts:
+        current = eid
+        while current:
+            try:
+                node = graph.get_node(current)
+            except KeyError:
+                break
+            all_expected_nodes.add(current)
+            parents = graph.get_parents(current)
+            current = parents[0] if parents else None
+
     per_level = {}
     for decision in prune_decisions:
         layer = decision["layer"]
         kept = set(decision.get("kept", []))
         discarded = set(decision.get("discarded", []))
-        error = any(root in discarded for root in expected_roots)
+        # Error: any expected-path node was discarded at this layer.
+        error = bool(discarded & all_expected_nodes)
         per_level[layer] = {
-            "errors": 1 if error else 0,
-            "total": 1,
-            "kept": kept,
-            "discarded": discarded,
-            "expected_roots": expected_roots,
+            "errors": per_level.get(layer, {}).get("errors", 0) + (1 if error else 0),
+            "total": per_level.get(layer, {}).get("total", 0) + 1,
         }
     return per_level
 
@@ -71,10 +96,35 @@ def main():
         print("No memory graph found. Run the server first.")
         sys.exit(1)
 
+    # Build prefix→full-ID map: eval/queries.json uses 8-char ID prefixes,
+    # but the graph stores full UUIDs. Expand on startup so all lookups work.
+    id_map: dict[str, str] = {}
+    for node in graph.all_nodes():
+        nid = node.id
+        for length in (8, 12, 16, 20, 24, 28, 32):
+            prefix = nid[:length]
+            if prefix not in id_map:
+                id_map[prefix] = nid
+            else:
+                # Collision at this length — don't overwrite. 8-char collisions
+                # are extremely rare with UUIDs; the first match wins.
+                pass
+
+    # Expand all expected IDs and roots in the query set.
+    for q in queries:
+        if "expected_facts" in q:
+            q["expected_facts"] = [
+                id_map.get(eid, eid) for eid in q["expected_facts"]
+            ]
+        if "expected_roots" in q:
+            q["expected_roots"] = [
+                id_map.get(eid, eid) for eid in q["expected_roots"]
+            ]
+
     header = (
         f"{'Query':<6} {'Type':<14} {'Flat Hit@10':>12} "
         f"{'Flat+Sum Hit@10':>17} {'Trav Hit@n':>12} "
-        f"{'Trav Cov':>9} {'Trav Layers':>11} {'Trav Kept/Pruned':>17}"
+        f"{'Trav Cov':>9} {'Total Prune':>11} {'Trav Kept/Pruned':>17}"
     )
     print(header)
     print("-" * 110)
@@ -92,7 +142,7 @@ def main():
         t0 = time.time()
         flat_text = recall(query_text, graph, top_k=10)
         flat_time = time.time() - t0
-        flat_hit = compute_hit_k(expected, flat_text)
+        flat_hit = compute_hit_k(expected, flat_text, graph)
 
         # --- Flat + summaries ---
         t0 = time.time()
@@ -107,31 +157,32 @@ def main():
             )
             combined_text = flat_text + "\n\n--- Summaries ---\n" + summary_context
         flat_sum_time = time.time() - t0
-        flat_sum_hit = compute_hit_k(expected, combined_text)
+        flat_sum_hit = compute_hit_k(expected, combined_text, graph)
 
         # --- Traversal ---
         t0 = time.time()
         trav_text, trav_metrics = traverse_recall(query_text, graph)
         trav_time = time.time() - t0
-        trav_hit = compute_hit_k(
-            expected, trav_text,
-            k=len(expected) if expected else 10,
-        )
-        trav_cov = compute_coverage(expected, trav_text)
+        trav_hit = compute_hit_k(expected, trav_text, graph)
+        trav_cov = compute_coverage(expected, trav_text, graph)
 
-        # --- Per-level prune-error ---
+        # --- Per-level prune-error (using full ancestor paths) ---
         expected_roots = q.get("expected_roots", [])
-        if expected_roots:
-            for decision in trav_metrics.get("prune_decisions", []):
-                layer = decision["layer"]
+        if expected or expected_roots:
+            pe = compute_prune_errors(expected, expected_roots,
+                                      trav_metrics.get("prune_decisions", []), graph)
+            for layer, info in pe.items():
                 if layer not in per_level_errors:
                     per_level_errors[layer] = {"errors": 0, "total": 0}
-                per_level_errors[layer]["total"] += 1
-                kept = set(decision.get("kept", []))
-                discarded = set(decision.get("discarded", []))
-                error = any(root in discarded for root in expected_roots)
-                if error:
-                    per_level_errors[layer]["errors"] += 1
+                per_level_errors[layer]["errors"] += info["errors"]
+                per_level_errors[layer]["total"] += info["total"]
+
+        # --- Detect total prunes ---
+        total_prune_layers = [
+            d["layer"] for d in trav_metrics.get("prune_decisions", [])
+            if not d.get("kept")
+        ]
+        total_prune_flag = ",".join(str(x) for x in total_prune_layers) if total_prune_layers else "-"
 
         # --- Print row ---
         kept = trav_metrics.get("branches_kept", 0)
@@ -143,7 +194,7 @@ def main():
             f"{flat_sum_hit:>14}/{len(expected):<2} "
             f"{trav_hit:>9}/{len(expected):<2} "
             f"{trav_cov:>8.2f} "
-            f"{layers:>10} "
+            f"{total_prune_flag:>11} "
             f"{kept:>2}/{pruned:<2}"
         )
 
