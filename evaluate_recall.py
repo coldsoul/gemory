@@ -19,20 +19,30 @@ def load_queries():
         return json.load(f)
 
 
-def compute_hit_k(expected_ids: list, returned_text: str, k: int = 10) -> int:
-    """Count how many expected fact IDs appear in the returned text."""
+def compute_hit_k(expected_ids: list, returned_text: str, graph: GraphStore) -> int:
+    """Count how many expected facts (by content) appear in the returned text."""
     found = 0
     for eid in expected_ids:
-        if eid in returned_text:
-            found += 1
+        try:
+            content = graph.get_node(eid).content
+            if content in returned_text:
+                found += 1
+        except KeyError:
+            pass
     return found
 
 
-def compute_coverage(expected_ids: list, returned_text: str) -> float:
-    """Fraction of expected facts present in the returned text."""
+def compute_coverage(expected_ids: list, returned_text: str, graph: GraphStore) -> float:
+    """Fraction of expected facts (by content) present in the returned text."""
     if not expected_ids:
         return 1.0
-    found = sum(1 for eid in expected_ids if eid in returned_text)
+    found = 0
+    for eid in expected_ids:
+        try:
+            if graph.get_node(eid).content in returned_text:
+                found += 1
+        except KeyError:
+            pass
     return found / len(expected_ids)
 
 
@@ -92,7 +102,7 @@ def main():
         t0 = time.time()
         flat_text = recall(query_text, graph, top_k=10)
         flat_time = time.time() - t0
-        flat_hit = compute_hit_k(expected, flat_text)
+        flat_hit = compute_hit_k(expected, flat_text, graph)
 
         # --- Flat + summaries ---
         t0 = time.time()
@@ -107,17 +117,14 @@ def main():
             )
             combined_text = flat_text + "\n\n--- Summaries ---\n" + summary_context
         flat_sum_time = time.time() - t0
-        flat_sum_hit = compute_hit_k(expected, combined_text)
+        flat_sum_hit = compute_hit_k(expected, combined_text, graph)
 
         # --- Traversal ---
         t0 = time.time()
         trav_text, trav_metrics = traverse_recall(query_text, graph)
         trav_time = time.time() - t0
-        trav_hit = compute_hit_k(
-            expected, trav_text,
-            k=len(expected) if expected else 10,
-        )
-        trav_cov = compute_coverage(expected, trav_text)
+        trav_hit = compute_hit_k(expected, trav_text, graph)
+        trav_cov = compute_coverage(expected, trav_text, graph)
 
         # --- Per-level prune-error ---
         expected_roots = q.get("expected_roots", [])
