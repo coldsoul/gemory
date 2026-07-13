@@ -309,3 +309,47 @@ class TestNoOrphanEdges:
                         f"Fact {grandchild} has {len(parents)} parents -- "
                         f"should have exactly 1 after re-parenting"
                     )
+
+
+class TestIdempotencyFullRun:
+    """Running the full dreamer twice produces identical graph structure."""
+
+    def test_double_run_is_noop(self, aspect_graph, monkeypatch):
+        """Node count, edge count identical after second run."""
+        store, topic_a, topic_b = aspect_graph
+
+        monkeypatch.setattr(
+            "src.consolidate.summarize_cluster",
+            lambda facts, **kw: {"label": "Aspect", "summary": "An aspect."},
+        )
+        monkeypatch.setattr("src.llm.embed", lambda x: [1.0, 0.0])
+        # Prevent new abstractions in upward pass
+        monkeypatch.setattr(
+            "src.dreamer.cluster_layer",
+            lambda graph, node_ids, method="hybrid", seed=42, context=None: [],
+        )
+
+        from src.dreamer import _split_node
+        from src.reach import backfill_reach
+        # Run once
+        for nid in [topic_a]:
+            _split_node(store, nid, "run1")
+        backfill_reach(store)
+        
+        node_count_1 = len(store.all_nodes())
+        edge_count_1 = sum(1 for _ in store.get_edges_by_relation("parent_of"))
+
+        # Run again — should be no-op
+        for nid in [topic_a]:
+            _split_node(store, nid, "run2")
+        backfill_reach(store)
+
+        node_count_2 = len(store.all_nodes())
+        edge_count_2 = sum(1 for _ in store.get_edges_by_relation("parent_of"))
+
+        assert node_count_1 == node_count_2, (
+            f"Node count changed: {node_count_1} → {node_count_2}"
+        )
+        assert edge_count_1 == edge_count_2, (
+            f"Edge count changed: {edge_count_1} → {edge_count_2}"
+        )

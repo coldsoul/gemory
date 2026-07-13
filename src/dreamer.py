@@ -184,28 +184,53 @@ def _create_abstraction(
     member_ids = list(cluster)
     member_nodes = [graph.get_node(mid) for mid in member_ids]
 
-    # Check for existing overlapping abstraction.
-    for existing in existing_abstractions:
-        existing_members = set(existing["member_ids"])
-        overlap = len(cluster & existing_members) / max(
-            len(cluster | existing_members), 1,
+    # Check for existing overlapping abstraction — first from this run
+    # (in-memory list), then from the graph (abstractions from prior runs).
+    def _check_overlap(ea_members: set, ea_id: str) -> str | None:
+        if not cluster or not ea_members:
+            return None
+        overlap = len(cluster & ea_members) / max(
+            len(cluster | ea_members), 1,
         )
         if overlap >= ABSTRACTION_OVERLAP:
-            abs_id = existing["id"]
-            new_members = cluster - existing_members
+            return ea_id
+        return None
+
+    for existing in existing_abstractions:
+        ea_id = existing["id"]
+        ea_members = set(existing["member_ids"])
+        found = _check_overlap(ea_members, ea_id)
+        if found:
+            new_members = cluster - ea_members
             if new_members:
                 for mid in new_members:
-                    graph.add_parent_edge(abs_id, mid)
-                logger.info(
-                    "Updated abstraction %s: attached %d new members",
-                    abs_id[:8], len(new_members),
-                )
+                    graph.add_parent_edge(found, mid)
+                logger.info("Updated abstraction %s: attached %d new members",
+                            found[:8], len(new_members))
             else:
-                logger.info(
-                    "Abstraction %s already covers this cluster, skipping",
-                    abs_id[:8],
-                )
-            return abs_id
+                logger.info("Abstraction %s already covers this cluster, skipping",
+                            found[:8])
+            return found
+
+    # Also check graph for abstractions from prior runs.
+    for node in graph.all_nodes():
+        if node.kind != "abstraction":
+            continue
+        # An abstraction from a prior run may not be in existing_abstractions.
+        # Check its children (parent_of edges) as the member set.
+        children = set(graph.get_children(node.id))
+        found = _check_overlap(children, node.id)
+        if found:
+            new_members = cluster - children
+            if new_members:
+                for mid in new_members:
+                    graph.add_parent_edge(found, mid)
+                logger.info("Updated existing abstraction %s: attached %d new members",
+                            found[:8], len(new_members))
+            else:
+                logger.info("Existing abstraction %s already covers this cluster, skipping",
+                            found[:8])
+            return found
 
     # Create new abstraction.
     if summary_result:
@@ -291,6 +316,10 @@ def _consolidate_layer(
                 "Skipping cluster of size %d: reach=%d < MIN_REACH=%d",
                 len(cluster), reach, MIN_REACH,
             )
+            continue
+
+        # Single-child abstractions add depth without value.
+        if len(cluster) <= 1:
             continue
 
         # Pre-check: summarize the cluster and veto non-theme results.
