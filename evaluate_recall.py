@@ -28,7 +28,7 @@ def compute_hit_k(expected_ids: list, returned_text: str, graph: GraphStore) -> 
             if content in returned_text:
                 found += 1
         except KeyError:
-            pass
+            print(f"WARNING: expected fact ID {eid!r} not found in graph", file=sys.stderr)
     return found
 
 
@@ -42,7 +42,7 @@ def compute_coverage(expected_ids: list, returned_text: str, graph: GraphStore) 
             if graph.get_node(eid).content in returned_text:
                 found += 1
         except KeyError:
-            pass
+            print(f"WARNING: expected fact ID {eid!r} not found in graph", file=sys.stderr)
     return found / len(expected_ids)
 
 
@@ -80,6 +80,31 @@ def main():
     except Exception:
         print("No memory graph found. Run the server first.")
         sys.exit(1)
+
+    # Build prefix→full-ID map: eval/queries.json uses 8-char ID prefixes,
+    # but the graph stores full UUIDs. Expand on startup so all lookups work.
+    id_map: dict[str, str] = {}
+    for node in graph.all_nodes():
+        nid = node.id
+        for length in (8, 12, 16, 20, 24, 28, 32):
+            prefix = nid[:length]
+            if prefix not in id_map:
+                id_map[prefix] = nid
+            else:
+                # Collision at this length — don't overwrite. 8-char collisions
+                # are extremely rare with UUIDs; the first match wins.
+                pass
+
+    # Expand all expected IDs and roots in the query set.
+    for q in queries:
+        if "expected_facts" in q:
+            q["expected_facts"] = [
+                id_map.get(eid, eid) for eid in q["expected_facts"]
+            ]
+        if "expected_roots" in q:
+            q["expected_roots"] = [
+                id_map.get(eid, eid) for eid in q["expected_roots"]
+            ]
 
     header = (
         f"{'Query':<6} {'Type':<14} {'Flat Hit@10':>12} "
