@@ -217,32 +217,54 @@ def traverse_recall(
         scored.sort(key=lambda x: x[0], reverse=True)
         ranked_branches[bid] = [f for _, f in scored]
 
-    # Allocate slots per branch: floor(N / kept_branches) each,
-    # remainder filled by top-scoring leftovers across all branches.
+    # Allocate slots per branch proportional to relevance.
+    # A branch's relevance = the mean of its top-3 cosine scores
+    # (so a branch with a single strong signal isn't drowned).
     n_branches = len(kept_branch_ids)
     if n_branches == 0:
         return "No matching facts found in traversal.", metrics
 
     limit = min(top_k, cfg.MAX_FACTS_RETURNED)
-    floor = max(1, limit // n_branches)
-    allocated: list = []
 
-    # Take floor from each branch (in prune order)
+    branch_scores: dict[str, float] = {}
     for bid in kept_branch_ids:
+        ranked = ranked_branches.get(bid, [])
+        if ranked:
+            top3 = [_score(n) for n in ranked[:3]]
+            branch_scores[bid] = sum(top3) / len(top3)
+        else:
+            branch_scores[bid] = 0.0
+
+    total_weight = sum(branch_scores.values())
+    if total_weight > 0:
+        raw_alloc = {bid: int(limit * s / total_weight) for bid, s in branch_scores.items()}
+    else:
+        raw_alloc = {bid: limit // n_branches for bid in kept_branch_ids}
+
+    # Cap: no branch gets more than 60% of slots, and at least 1 if it has facts.
+    max_cap = max(1, int(limit * 0.6))
+    for bid in kept_branch_ids:
+        if branch_scores[bid] > 0:
+            raw_alloc[bid] = min(raw_alloc.get(bid, 0), max_cap)
+            raw_alloc[bid] = max(raw_alloc.get(bid, 0), 1)
+
+    # Distribute remainder to highest-scoring branches.
+    used = sum(raw_alloc.values())
+    remaining = limit - used
+    while remaining > 0:
+        best_bid = max(branch_scores, key=branch_scores.get)
+        raw_alloc[best_bid] = raw_alloc.get(best_bid, 0) + 1
+        branch_scores[best_bid] = -1  # prevent re-selection
+        remaining -= 1
+
+    # Fill from each branch.
+    allocated: list = []
+    for bid in kept_branch_ids:
+        quota = raw_alloc.get(bid, 0)
         branch_ranked = ranked_branches.get(bid, [])
-        allocated.extend(branch_ranked[:floor])
+        allocated.extend(branch_ranked[:quota])
 
-    # Fill remainder with best remaining facts across all branches
-    if len(allocated) < limit:
-        leftovers = []
-        for bid in kept_branch_ids:
-            branch_ranked = ranked_branches.get(bid, [])
-            leftovers.extend(branch_ranked[floor:])
-        leftovers.sort(key=lambda n: _score(n), reverse=True)
-        remaining = limit - len(allocated)
-        allocated.extend(leftovers[:remaining])
-
-    # Deduplicate
+    # Deduplicate (paranoia: a fact may appear under multiple branches).
     seen: set[str] = set()
     collected_facts = []
     for n in allocated:
@@ -251,8 +273,10 @@ def traverse_recall(
             collected_facts.append(n)
 
     logger.info(
-        "Traversal: %d kept branches, %d facts collected → %d slots (%d per branch floor)",
-        n_branches, total_facts, len(collected_facts), floor,
+        "Traversal: %d kept branches, %d total facts → %d slots "
+        "(alloc: %s)",
+        n_branches, total_facts, len(collected_facts),
+        {bid: raw_alloc.get(bid, 0) for bid in kept_branch_ids},
     )
 
     # Format output.
