@@ -194,3 +194,44 @@ class TestRelationExpansion:
         text, _ = traverse_recall("test", store, relation_expansion=True)
         assert "Summary B" in text  # B should appear (1 hop)
         assert "Summary C" not in text  # C should NOT appear (2 hops)
+
+
+class TestLargeRelatedNode:
+    def test_large_node_summary_only(self, tmp_graph_path, monkeypatch):
+        """A related node exceeding MAX_RELATED_FACTS gets summary only."""
+        store = GraphStore(tmp_graph_path)
+
+        root_a = store.add_node(
+            content="A", embedding=[1.0, 0.0],
+            provenance={"source_id": "ra", "label": "A", "timestamp": ""},
+            kind="abstraction", label="A", summary="Summary A.",
+        )
+        store.set_node_attr(root_a, "level", 1)
+        fid = store.add_node(content="Fact A", embedding=[1.0, 0.0],
+                            provenance={"source_id": "fa", "label": "", "timestamp": ""})
+        store.add_parent_edge(root_a, fid)
+
+        root_b = store.add_node(
+            content="B", embedding=[0.0, 1.0],
+            provenance={"source_id": "rb", "label": "B", "timestamp": ""},
+            kind="abstraction", label="B", summary="Summary B.",
+        )
+        store.set_node_attr(root_b, "level", 1)
+        for i in range(15):
+            fid = store.add_node(content=f"Fact B{i}", embedding=[float(i), 0.0],
+                                provenance={"source_id": f"fb{i}", "label": "", "timestamp": ""})
+            store.add_parent_edge(root_b, fid)
+
+        store._graph.add_edge(root_a, root_b, relation="relates_to",
+                              provenance="stated", origin_fact="fa")
+
+        monkeypatch.setattr(
+            "src.llm.prune_branches",
+            lambda q, c: [c[0]["id"]],
+        )
+
+        text, _ = traverse_recall("test", store, relation_expansion=True)
+        assert "Related context" in text
+        fact_count = text.count("Fact B")
+        assert fact_count <= 8
+        assert "+" in text or "more" in text
