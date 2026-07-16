@@ -182,7 +182,42 @@ def traverse_recall(
         if not abstractions:
             break
 
-        # Prune abstraction candidates.
+        # Budget-aware pruning: only prune into a node's abstraction
+        # children when its full subtree would exceed MAX_RETURNED_FACTS
+        # if returned whole.  Demand-driven descent — don't descend where
+        # the answer already fits.
+        keep_whole: list[str] = []    # keep everything under these nodes
+        to_prune: list[any] = []      # need pruning — subtree exceeds budget
+
+        for node in abstractions:
+            if node.reach > 0 and node.reach <= budget:
+                keep_whole.append(node.id)
+            else:
+                to_prune.append(node)
+
+        if keep_whole:
+            logger.info(
+                "Depth %d: %d nodes within budget — keeping whole, no prune",
+                depth, len(keep_whole),
+            )
+
+        # If nothing needs pruning and we have keep_whole nodes,
+        # expand ALL their children without a prune decision.
+        if not to_prune:
+            next_frontier: set[str] = set(pass_through)
+            for kid in keep_whole:
+                children = graph.get_children(kid)
+                next_frontier.update(children)
+                if kid not in kept_tree:
+                    kept_tree[kid] = {"node": all_nodes[kid], "children": []}
+                kept_tree[kid]["children"].extend(children)
+                kept_abstraction_ids.add(kid)
+            frontier = list(next_frontier)
+            depth += 1
+            metrics["layers_visited"] = depth
+            continue
+
+        # Prune abstraction candidates that exceed budget.
         candidates = [
             {
                 "id": n.id,
@@ -190,7 +225,7 @@ def traverse_recall(
                 "summary": n.summary or n.content,
                 "reach": n.reach,
             }
-            for n in abstractions
+            for n in to_prune
         ]
 
         try:
@@ -242,6 +277,13 @@ def traverse_recall(
             children = graph.get_children(kid)
             next_frontier.update(children)
             kept_tree[kid]["children"].extend(children)
+        for kid in keep_whole:
+            children = graph.get_children(kid)
+            next_frontier.update(children)
+            if kid not in kept_tree:
+                kept_tree[kid] = {"node": all_nodes[kid], "children": []}
+            kept_tree[kid]["children"].extend(children)
+            kept_abstraction_ids.add(kid)
 
         frontier = list(next_frontier)
         depth += 1
