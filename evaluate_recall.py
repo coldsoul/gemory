@@ -124,10 +124,10 @@ def main():
     header = (
         f"{'Query':<6} {'Type':<14} {'Flat Hit@10':>12} "
         f"{'Flat+Sum Hit@10':>17} {'Trav Hit@n':>12} "
-        f"{'Trav Cov':>9} {'Total Prune':>11} {'Trav Kept/Pruned':>17}"
+        f"{'Trav+Exp Hit':>14} {'Total Prune':>11} {'Trav Kept/Pruned':>17}"
     )
     print(header)
-    print("-" * 110)
+    print("-" * 125)
 
     type_results: dict = {}
     per_level_errors: dict[int, dict] = {}  # layer → {errors, total}
@@ -159,12 +159,17 @@ def main():
         flat_sum_time = time.time() - t0
         flat_sum_hit = compute_hit_k(expected, combined_text, graph)
 
-        # --- Traversal ---
+        # --- Traversal (expansion OFF) ---
         t0 = time.time()
-        trav_text, trav_metrics = traverse_recall(query_text, graph)
+        trav_text, trav_metrics = traverse_recall(query_text, graph, relation_expansion=False)
         trav_time = time.time() - t0
         trav_hit = compute_hit_k(expected, trav_text, graph)
-        trav_cov = compute_coverage(expected, trav_text, graph)
+
+        # --- Traversal + expansion ON ---
+        t0 = time.time()
+        trav_exp_text, trav_exp_metrics = traverse_recall(query_text, graph, relation_expansion=True)
+        trav_exp_time = time.time() - t0
+        trav_exp_hit = compute_hit_k(expected, trav_exp_text, graph)
 
         # --- Per-level prune-error (using full ancestor paths) ---
         expected_roots = q.get("expected_roots", [])
@@ -187,13 +192,12 @@ def main():
         # --- Print row ---
         kept = trav_metrics.get("branches_kept", 0)
         pruned = trav_metrics.get("branches_pruned", 0)
-        layers = trav_metrics.get("layers_visited", 0)
         print(
             f"{qid:<6} {qtype:<14} "
             f"{flat_hit:>9}/{len(expected):<2} "
             f"{flat_sum_hit:>14}/{len(expected):<2} "
             f"{trav_hit:>9}/{len(expected):<2} "
-            f"{trav_cov:>8.2f} "
+            f"{trav_exp_hit:>11}/{len(expected):<2} "
             f"{total_prune_flag:>11} "
             f"{kept:>2}/{pruned:<2}"
         )
@@ -202,13 +206,13 @@ def main():
         if qtype not in type_results:
             type_results[qtype] = {
                 "flat_hit": 0, "flat_sum_hit": 0, "trav_hit": 0,
-                "trav_cov": 0.0, "count": 0, "total_expected": 0,
+                "trav_exp_hit": 0, "count": 0, "total_expected": 0,
             }
         tr = type_results[qtype]
         tr["flat_hit"] += flat_hit
         tr["flat_sum_hit"] += flat_sum_hit
         tr["trav_hit"] += trav_hit
-        tr["trav_cov"] += trav_cov
+        tr["trav_exp_hit"] += trav_exp_hit
         tr["count"] += 1
         tr["total_expected"] += len(expected)
 
@@ -216,23 +220,25 @@ def main():
     print("\n--- Per-Type Averages ---")
     agg_header = (
         f"{'Type':<14} {'Count':>6} {'Flat Hit%':>10} "
-        f"{'Flat+Sum Hit%':>14} {'Trav Hit%':>10} {'Trav Cov%':>10}"
+        f"{'Flat+Sum Hit%':>14} {'Trav Hit%':>10} {'Trav+Exp Hit%':>15} {'Delta':>7}"
     )
     print(agg_header)
-    print("-" * 65)
+    print("-" * 80)
     for qtype, tr in sorted(type_results.items()):
         n = tr["count"]
         total_exp = tr["total_expected"]
         flat_pct = (tr["flat_hit"] / total_exp * 100) if total_exp else 0
         fs_pct = (tr["flat_sum_hit"] / total_exp * 100) if total_exp else 0
         trav_pct = (tr["trav_hit"] / total_exp * 100) if total_exp else 0
-        trav_cov_pct = (tr["trav_cov"] / n * 100) if n else 0
+        trav_exp_pct = (tr["trav_exp_hit"] / total_exp * 100) if total_exp else 0
+        delta = trav_exp_pct - trav_pct
         print(
             f"{qtype:<14} {n:>6} "
             f"{flat_pct:>9.0f}% "
             f"{fs_pct:>13.0f}% "
             f"{trav_pct:>9.0f}% "
-            f"{trav_cov_pct:>9.0f}%"
+            f"{trav_exp_pct:>14.0f}% "
+            f"{delta:>+6.0f}%"
         )
 
     # --- Per-level prune-error rates ---
