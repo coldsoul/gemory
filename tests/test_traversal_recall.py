@@ -17,12 +17,12 @@ def traversal_graph(tmp_graph_path):
     """Build a small 2-level graph with 2 roots and facts under them."""
     store = GraphStore(tmp_graph_path)
 
-    # Root A: a topic with 3 facts — reach=999 forces budget-gated pruning
+    # Root A: a topic with 3 facts
     root_a = store.add_node(
         content="Topic A", embedding=[1.0, 0.0],
         provenance={"source_id": "ra", "label": "Topic A", "timestamp": ""},
         kind="abstraction", label="Topic A",
-        summary="Summary of Topic A.", reach=999,
+        summary="Summary of Topic A.", reach=3,
     )
     store.set_node_attr(root_a, "level", 1)
     for i in range(3):
@@ -32,12 +32,12 @@ def traversal_graph(tmp_graph_path):
         )
         store.add_parent_edge(root_a, fid)
 
-    # Root B: a topic with 2 facts — reach=999 forces budget-gated pruning
+    # Root B: a topic with 2 facts
     root_b = store.add_node(
         content="Topic B", embedding=[0.0, 1.0],
         provenance={"source_id": "rb", "label": "Topic B", "timestamp": ""},
         kind="abstraction", label="Topic B",
-        summary="Summary of Topic B.", reach=999,
+        summary="Summary of Topic B.", reach=2,
     )
     store.set_node_attr(root_b, "level", 1)
     for i in range(2):

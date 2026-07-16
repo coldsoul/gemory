@@ -20,7 +20,7 @@ def expansion_graph(tmp_graph_path):
         content="Topic A", embedding=[1.0, 0.0],
         provenance={"source_id": "ra", "label": "Topic A", "timestamp": ""},
         kind="abstraction", label="Topic A",
-        summary="Summary A.", reach=999,
+        summary="Summary A.", reach=2,
     )
     store.set_node_attr(root_a, "level", 1)
     for i in range(2):
@@ -35,7 +35,7 @@ def expansion_graph(tmp_graph_path):
         content="Topic B", embedding=[0.0, 1.0],
         provenance={"source_id": "rb", "label": "Topic B", "timestamp": ""},
         kind="abstraction", label="Topic B",
-        summary="Summary B.", reach=999,
+        summary="Summary B.", reach=1,
     )
     store.set_node_attr(root_b, "level", 1)
     fid = store.add_node(
@@ -116,7 +116,7 @@ class TestRelationExpansion:
         root_a = store.add_node(
             content="A", embedding=[1.0, 0.0],
             provenance={"source_id": "ra", "label": "A", "timestamp": ""},
-            kind="abstraction", label="A", summary="A.", reach=999,
+            kind="abstraction", label="A", summary="A.", reach=1,
         )
         store.set_node_attr(root_a, "level", 1)
         fid_a = store.add_node(
@@ -128,7 +128,7 @@ class TestRelationExpansion:
         root_b = store.add_node(
             content="B", embedding=[0.0, 1.0],
             provenance={"source_id": "rb", "label": "B", "timestamp": ""},
-            kind="abstraction", label="B", summary="B.", reach=999,
+            kind="abstraction", label="B", summary="B.", reach=1,
         )
         store.set_node_attr(root_b, "level", 1)
         fid_b = store.add_node(
@@ -163,7 +163,7 @@ class TestRelationExpansion:
                     "source_id": name, "label": name, "timestamp": "",
                 },
                 kind="abstraction", label=name, summary=f"Summary {name}.",
-                reach=999,
+                reach=1,
             )
             store.set_node_attr(n, "level", 1)
             f = store.add_node(
