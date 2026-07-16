@@ -133,16 +133,25 @@ Extract durable facts from a conversation transcript and store them in the memor
 ### `recall`
 
 Search the memory graph for facts relevant to a query.
-Call this at the start of a conversation to load context.
+Two methods are available:
+
+**Flat** (default) — cosine similarity over all stored facts.
+**Traversal** — hierarchical descent: starts at root topics, uses the LLM to prune
+irrelevant branches at each level, descends into kept ones, and returns the surviving
+region grouped by branch with summaries.
 
 **Input:**
 
 | Parameter | Type    | Required | Description                                   |
 |-----------|---------|----------|-----------------------------------------------|
 | `query`   | string  | yes      | Query to search for relevant memories           |
-| `top_k`   | integer | no       | Maximum number of results (default: 5)          |
+| `top_k`   | integer | no       | Max results for flat method (default: 5)        |
+| `method`  | string  | no       | `"flat"` (default) or `"traverse"`              |
+| `relation_expansion` | boolean | no | Follow relates_to edges one hop from kept branches (traverse only, default: true) |
 
-**Returns:** Ranked list of matching facts with similarity scores and confidence levels.
+**Returns:** For flat: ranked list with similarity scores.
+For traverse: surviving region grouped by branch with summaries, plus related context
+from relation edges.
 
 ## Data model
 
@@ -173,7 +182,7 @@ Edges display relationship type and weight.
 uv run pytest tests/ -v
 ```
 
-All 41 deterministic tests use stubbed embeddings — no network or API keys needed.
+All 159 deterministic tests use stubbed embeddings — no network or API keys needed.
 
 The test harness includes frozen transcript fixtures, controlled vector construction
 via Cholesky decomposition, and a graph snapshot/diff helper for declarative assertions.
@@ -185,15 +194,44 @@ Live sanity tests (real API calls, skipped by default):
 GEMORY_LIVE=1 uv run pytest tests/live/ -v -s
 ```
 
+### Run the offline dreamer (graph consolidation)
+
+The dreamer builds hierarchy from the flat topic layer:
+
+```bash
+uv run python src/dreamer.py                         # dry-run preview
+uv run python src/dreamer.py --apply                 # commit with backup
+uv run python src/dreamer.py --recent 7             # only recent activity
+```
+
+See [DREAMER.md](docs/DREAMER.md) for usage, rollback, and review checklists.
+
+### Run the evaluation harness
+
+Compare flat vs traversal recall across 18 typed queries:
+
+```bash
+uv run python evaluate_recall.py
+```
+
+Reports per-query hit rates, per-type aggregates, prune-error per level, and the
+expansion delta (traversal with vs without relation expansion). The query set lives
+at `eval/queries.json`.
+
 ### Architecture
 
 ```
 src/
 ├── server.py       # MCP server: remember + recall tools (stdio + SSE)
+├── dreamer.py      # Offline consolidation: topics → aspects → themes
 ├── graph.py        # GraphStore: in-memory DiGraph + JSON persistence
-├── llm.py          # DeepSeek wrapper: fact extraction + embeddings
-├── extractor.py    # Store algorithm: source_id, dedup, edge creation
-├── recall.py       # Query → embed → similarity search → formatted results
+├── llm.py          # DeepSeek wrapper: extraction, summarization, pruning
+├── extractor.py    # Store algorithm: source_id, dedup, topic linking
+├── recall.py       # Flat + traversal recall, relation expansion
+├── cluster.py      # Louvain community detection over embeddings
+├── topics.py       # Topic registry: match-or-create canonical topics
+├── consolidate.py  # Cluster layer + summarize layer with input contracts
+├── reach.py        # Transitive leaf count via parent_of traversal
 ├── config.py       # Environment-driven constants and thresholds
 ├── models.py       # Node and Edge dataclasses
 scripts/
@@ -208,7 +246,10 @@ docs/
 tests/
 ├── fixtures/       # Frozen transcripts + expectation files
 ├── live/           # Live sanity suite (GEMORY_LIVE=1, manual only)
-└── *.py            # 41 deterministic unit + integration tests
+└── *.py            # 159 deterministic unit + integration tests
+eval/
+└── queries.json    # 18 typed queries for eval harness
+evaluate_recall.py  # 3-arm evaluation harness
 ```
 
 Strict isolation rules:

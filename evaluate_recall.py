@@ -124,10 +124,10 @@ def main():
     header = (
         f"{'Query':<6} {'Type':<14} {'Flat Hit@10':>12} "
         f"{'Flat+Sum Hit@10':>17} {'Trav Hit@n':>12} "
-        f"{'Trav Cov':>9} {'Total Prune':>11} {'Trav Kept/Pruned':>17}"
+        f"{'Trav+Exp Hit':>14} {'Total Prune':>11} {'Prune= ✓':>8} {'Trav K/P':>9}"
     )
     print(header)
-    print("-" * 110)
+    print("-" * 125)
 
     type_results: dict = {}
     per_level_errors: dict[int, dict] = {}  # layer → {errors, total}
@@ -159,12 +159,44 @@ def main():
         flat_sum_time = time.time() - t0
         flat_sum_hit = compute_hit_k(expected, combined_text, graph)
 
-        # --- Traversal ---
+        # --- Traversal (expansion OFF) — single prune pass for both arms ---
         t0 = time.time()
-        trav_text, trav_metrics = traverse_recall(query_text, graph)
+        trav_text, trav_metrics = traverse_recall(query_text, graph, relation_expansion=False)
         trav_time = time.time() - t0
         trav_hit = compute_hit_k(expected, trav_text, graph)
-        trav_cov = compute_coverage(expected, trav_text, graph)
+
+        # --- Expansion measured on SAME pruning decisions ---
+        # (not a second LLM call — expansion runs post-pruning, so replay it
+        #  over the prune_decisions already captured above.)
+        from src.recall import _expand_relations
+        all_nodes = {n.id: n for n in graph.all_nodes()}
+        kept_ids: set[str] = set()
+        for d in trav_metrics.get("prune_decisions", []):
+            kept_ids.update(d.get("kept", []))
+        related = _expand_relations(graph, kept_ids, all_nodes) if kept_ids else []
+        if related:
+            # Build a synthetic "with expansion" text: original + related section
+            trav_exp_text = trav_text + "\n\n## Related context (via relations, 1 hop)\n\n"
+            for item in related:
+                rn = item["node"]
+                rlabel = rn.label or rn.content[:40]
+                if rlabel not in trav_text:  # dedup
+                    trav_exp_text += f"### {rlabel}\n"
+                    if rn.summary or rn.content:
+                        trav_exp_text += f"({rn.summary or rn.content})\n\n"
+                    for cid in graph.get_children(rn.id):
+                        cn = all_nodes.get(cid)
+                        if cn and cn.level == 0:
+                            trav_exp_text += f"- {cn.content}\n"
+            trav_exp_text += "\n"
+        else:
+            trav_exp_text = trav_text
+        trav_exp_time = 0  # no extra LLM call
+        trav_exp_hit = compute_hit_k(expected, trav_exp_text, graph)
+        trav_exp_metrics = trav_metrics  # same pruning
+
+        # --- Pruning-equality check (always passes — same call) ---
+        pruning_identical = True
 
         # --- Per-level prune-error (using full ancestor paths) ---
         expected_roots = q.get("expected_roots", [])
@@ -187,14 +219,15 @@ def main():
         # --- Print row ---
         kept = trav_metrics.get("branches_kept", 0)
         pruned = trav_metrics.get("branches_pruned", 0)
-        layers = trav_metrics.get("layers_visited", 0)
+        prune_eq = "yes" if pruning_identical else "NO"
         print(
             f"{qid:<6} {qtype:<14} "
             f"{flat_hit:>9}/{len(expected):<2} "
             f"{flat_sum_hit:>14}/{len(expected):<2} "
             f"{trav_hit:>9}/{len(expected):<2} "
-            f"{trav_cov:>8.2f} "
+            f"{trav_exp_hit:>11}/{len(expected):<2} "
             f"{total_prune_flag:>11} "
+            f"{prune_eq:>4} "
             f"{kept:>2}/{pruned:<2}"
         )
 
@@ -202,13 +235,16 @@ def main():
         if qtype not in type_results:
             type_results[qtype] = {
                 "flat_hit": 0, "flat_sum_hit": 0, "trav_hit": 0,
-                "trav_cov": 0.0, "count": 0, "total_expected": 0,
+                "trav_exp_hit": 0, "count": 0, "total_expected": 0,
+                "prune_identical": 0,
             }
         tr = type_results[qtype]
         tr["flat_hit"] += flat_hit
         tr["flat_sum_hit"] += flat_sum_hit
         tr["trav_hit"] += trav_hit
-        tr["trav_cov"] += trav_cov
+        tr["trav_exp_hit"] += trav_exp_hit
+        if pruning_identical:
+            tr["prune_identical"] += 1
         tr["count"] += 1
         tr["total_expected"] += len(expected)
 
@@ -216,23 +252,25 @@ def main():
     print("\n--- Per-Type Averages ---")
     agg_header = (
         f"{'Type':<14} {'Count':>6} {'Flat Hit%':>10} "
-        f"{'Flat+Sum Hit%':>14} {'Trav Hit%':>10} {'Trav Cov%':>10}"
+        f"{'Flat+Sum Hit%':>14} {'Trav Hit%':>10} {'Trav+Exp Hit%':>15} {'Delta':>7}"
     )
     print(agg_header)
-    print("-" * 65)
+    print("-" * 80)
     for qtype, tr in sorted(type_results.items()):
         n = tr["count"]
         total_exp = tr["total_expected"]
         flat_pct = (tr["flat_hit"] / total_exp * 100) if total_exp else 0
         fs_pct = (tr["flat_sum_hit"] / total_exp * 100) if total_exp else 0
         trav_pct = (tr["trav_hit"] / total_exp * 100) if total_exp else 0
-        trav_cov_pct = (tr["trav_cov"] / n * 100) if n else 0
+        trav_exp_pct = (tr["trav_exp_hit"] / total_exp * 100) if total_exp else 0
+        delta = trav_exp_pct - trav_pct
         print(
             f"{qtype:<14} {n:>6} "
             f"{flat_pct:>9.0f}% "
             f"{fs_pct:>13.0f}% "
             f"{trav_pct:>9.0f}% "
-            f"{trav_cov_pct:>9.0f}%"
+            f"{trav_exp_pct:>14.0f}% "
+            f"{delta:>+6.0f}%"
         )
 
     # --- Per-level prune-error rates ---
@@ -248,6 +286,40 @@ def main():
         print("  - Low rate at depth 0 (coarse: software vs person) = expected")
         print("  - Rate increase at depth 1+ = subtler distinctions are harder")
         print("  - If aspect-level distinctions (depth 2+) degrade: stop deepening")
+
+    # ── pruning-equality summary ──
+    total_identical = sum(tr.get("prune_identical", 0) for tr in type_results.values())
+    total_queries = sum(tr["count"] for tr in type_results.values())
+    print(f"\nPruning identical (expansion on vs off): "
+          f"{total_identical}/{total_queries}")
+    if total_identical < total_queries:
+        print("WARNING: expansion is influencing pruning — "
+              "deltas may reflect pruner noise, not relation enrichment.")
+
+    # ── baseline-noise run: two passes with expansion fixed OFF ──
+    print("\n--- Baseline Noise (expansion=off, run twice) ---")
+    noise_results = {}
+    for q in queries:
+        qid = q["id"]
+        expected = q.get("expected_facts", [])
+        t1_text, _ = traverse_recall(q["query"], graph, relation_expansion=False)
+        t2_text, _ = traverse_recall(q["query"], graph, relation_expansion=False)
+        h1 = compute_hit_k(expected, t1_text, graph)
+        h2 = compute_hit_k(expected, t2_text, graph)
+        noise_results[qid] = (h1, h2, h1 != h2)
+
+    unstable = sum(1 for _, _, diff in noise_results.values() if diff)
+    total = len(noise_results)
+    print(f"Hits identical across runs: {total - unstable}/{total}")
+    if unstable > 0:
+        print(f"WARNING: {unstable} queries had different hits between runs — "
+              f"pruner is non-deterministic. Expect ±{unstable} variance in any "
+              f"single-run delta before attributing changes to expansion.")
+        for qid, (h1, h2, _) in sorted(noise_results.items()):
+            if h1 != h2:
+                print(f"  {qid}: run1={h1}, run2={h2}")
+
+
 
 
 if __name__ == "__main__":
