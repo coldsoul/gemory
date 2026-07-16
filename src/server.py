@@ -135,6 +135,14 @@ async def handle_list_tools() -> list[types.Tool]:
                         "enum": ["flat", "traverse"],
                         "default": "flat",
                     },
+                    "relation_expansion": {
+                        "type": "boolean",
+                        "description": (
+                            "Follow relates_to edges one hop from kept branches "
+                            "(default: true). Only for 'traverse' method."
+                        ),
+                        "default": True,
+                    },
                 },
                 "required": ["query"],
             },
@@ -211,7 +219,10 @@ async def _handle_recall(arguments: dict) -> list[types.TextContent]:
 
     try:
         if method == "traverse":
-            result_text, metrics = traverse_recall(query, graph)
+            relation_expansion = arguments.get("relation_expansion", True)
+            result_text, metrics = traverse_recall(
+                query, graph, relation_expansion=relation_expansion,
+            )
             logger.info(
                 "Traverse recall: %d layers, %d facts, %d kept/%d pruned",
                 metrics["layers_visited"], metrics["facts_collected"],
