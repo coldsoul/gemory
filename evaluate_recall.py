@@ -124,7 +124,7 @@ def main():
     header = (
         f"{'Query':<6} {'Type':<14} {'Flat Hit@10':>12} "
         f"{'Flat+Sum Hit@10':>17} {'Trav Hit@n':>12} "
-        f"{'Trav+Exp Hit':>14} {'Total Prune':>11} {'Trav Kept/Pruned':>17}"
+        f"{'Trav+Exp Hit':>14} {'Total Prune':>11} {'Prune= ✓':>8} {'Trav K/P':>9}"
     )
     print(header)
     print("-" * 125)
@@ -171,6 +171,17 @@ def main():
         trav_exp_time = time.time() - t0
         trav_exp_hit = compute_hit_k(expected, trav_exp_text, graph)
 
+        # --- Pruning-equality check: expansion must not alter pruning ---
+        prune_off = [
+            (d["layer"], sorted(d.get("kept", [])), sorted(d.get("discarded", [])))
+            for d in trav_metrics.get("prune_decisions", [])
+        ]
+        prune_on = [
+            (d["layer"], sorted(d.get("kept", [])), sorted(d.get("discarded", [])))
+            for d in trav_exp_metrics.get("prune_decisions", [])
+        ]
+        pruning_identical = prune_off == prune_on
+
         # --- Per-level prune-error (using full ancestor paths) ---
         expected_roots = q.get("expected_roots", [])
         if expected or expected_roots:
@@ -192,6 +203,7 @@ def main():
         # --- Print row ---
         kept = trav_metrics.get("branches_kept", 0)
         pruned = trav_metrics.get("branches_pruned", 0)
+        prune_eq = "yes" if pruning_identical else "NO"
         print(
             f"{qid:<6} {qtype:<14} "
             f"{flat_hit:>9}/{len(expected):<2} "
@@ -199,6 +211,7 @@ def main():
             f"{trav_hit:>9}/{len(expected):<2} "
             f"{trav_exp_hit:>11}/{len(expected):<2} "
             f"{total_prune_flag:>11} "
+            f"{prune_eq:>4} "
             f"{kept:>2}/{pruned:<2}"
         )
 
@@ -207,12 +220,15 @@ def main():
             type_results[qtype] = {
                 "flat_hit": 0, "flat_sum_hit": 0, "trav_hit": 0,
                 "trav_exp_hit": 0, "count": 0, "total_expected": 0,
+                "prune_identical": 0,
             }
         tr = type_results[qtype]
         tr["flat_hit"] += flat_hit
         tr["flat_sum_hit"] += flat_sum_hit
         tr["trav_hit"] += trav_hit
         tr["trav_exp_hit"] += trav_exp_hit
+        if pruning_identical:
+            tr["prune_identical"] += 1
         tr["count"] += 1
         tr["total_expected"] += len(expected)
 
@@ -254,6 +270,40 @@ def main():
         print("  - Low rate at depth 0 (coarse: software vs person) = expected")
         print("  - Rate increase at depth 1+ = subtler distinctions are harder")
         print("  - If aspect-level distinctions (depth 2+) degrade: stop deepening")
+
+    # ── pruning-equality summary ──
+    total_identical = sum(tr.get("prune_identical", 0) for tr in type_results.values())
+    total_queries = sum(tr["count"] for tr in type_results.values())
+    print(f"\nPruning identical (expansion on vs off): "
+          f"{total_identical}/{total_queries}")
+    if total_identical < total_queries:
+        print("WARNING: expansion is influencing pruning — "
+              "deltas may reflect pruner noise, not relation enrichment.")
+
+    # ── baseline-noise run: two passes with expansion fixed OFF ──
+    print("\n--- Baseline Noise (expansion=off, run twice) ---")
+    noise_results = {}
+    for q in queries:
+        qid = q["id"]
+        expected = q.get("expected_facts", [])
+        t1_text, _ = traverse_recall(q["query"], graph, relation_expansion=False)
+        t2_text, _ = traverse_recall(q["query"], graph, relation_expansion=False)
+        h1 = compute_hit_k(expected, t1_text, graph)
+        h2 = compute_hit_k(expected, t2_text, graph)
+        noise_results[qid] = (h1, h2, h1 != h2)
+
+    unstable = sum(1 for _, _, diff in noise_results.values() if diff)
+    total = len(noise_results)
+    print(f"Hits identical across runs: {total - unstable}/{total}")
+    if unstable > 0:
+        print(f"WARNING: {unstable} queries had different hits between runs — "
+              f"pruner is non-deterministic. Expect ±{unstable} variance in any "
+              f"single-run delta before attributing changes to expansion.")
+        for qid, (h1, h2, _) in sorted(noise_results.items()):
+            if h1 != h2:
+                print(f"  {qid}: run1={h1}, run2={h2}")
+
+
 
 
 if __name__ == "__main__":
