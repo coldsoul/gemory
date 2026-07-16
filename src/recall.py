@@ -75,12 +75,55 @@ def recall(query: str, graph: GraphStore, top_k: int = 5) -> str:
 # Traversal-based recall
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Relation expansion
+# ---------------------------------------------------------------------------
+
+def _expand_relations(
+    graph: GraphStore,
+    kept_abstraction_ids: set[str],
+    all_nodes: dict[str, object],
+) -> list[dict]:
+    """Follow relates_to edges one hop from *kept_abstraction_ids*.
+
+    Only follows edges with ``provenance="stated"`` (facts asserted).
+    Excludes nodes already in the traversed region.
+    Returns a list of dicts: ``{node, edge: (from_id, to_id, data)}``.
+    """
+    related: dict[str, dict] = {}
+    for nid in kept_abstraction_ids:
+        for source, target, data in graph.get_edges_by_relation("relates_to"):
+            if data.get("provenance") != "stated":
+                continue
+            other: str | None = None
+            if source == nid:
+                other = target
+            elif target == nid:
+                other = source  # treat as bidirectional for one hop
+            if other is not None and other not in kept_abstraction_ids and other not in related:
+                if other in all_nodes:
+                    related[other] = {
+                        "node": all_nodes[other],
+                        "edge": (source, target, data),
+                    }
+    return list(related.values())
+
+
+# ---------------------------------------------------------------------------
+# Traversal-based recall
+# ---------------------------------------------------------------------------
+
 def traverse_recall(
     query: str,
     graph: GraphStore,
+    relation_expansion: bool = True,
 ) -> tuple[str, dict]:
     """Traversal-based recall: descend by parent_of, prune, return the
     surviving region grouped by branch with summaries attached.
+
+    When *relation_expansion* is true (default), stated ``relates_to``
+    edges from kept branches are followed one hop and their targets
+    rendered under a ``## Related context`` section.
 
     Returns ``(formatted_text, metrics_dict)`` where *metrics_dict* contains
     ``layers_visited``, ``branches_pruned``, ``branches_kept``,
@@ -224,6 +267,16 @@ def traverse_recall(
         for info in kept_tree.values()
     )
 
+    # ── relation expansion: one-hop from kept branches ──
+    related_nodes: list[dict] = []
+    if relation_expansion and kept_abstraction_ids:
+        related_nodes = _expand_relations(graph, kept_abstraction_ids, all_nodes)
+        if related_nodes:
+            logger.info(
+                "Relation expansion: %d related nodes from %d kept branches",
+                len(related_nodes), len(kept_abstraction_ids),
+            )
+
     # ── render: grouped by branch, with summaries ──
     lines: list[str] = []
     rendered_facts = 0
@@ -268,6 +321,37 @@ def traverse_recall(
             lines.append(f"- {f.content}")
             rendered_facts += 1
         lines.append("")
+
+    # ── related context section ──
+    if related_nodes:
+        lines.append("## Related context (via relations, 1 hop)")
+        lines.append("")
+        for item in related_nodes:
+            node = item["node"]
+            source, target, data = item["edge"]
+            label = node.label or node.content[:40]
+            summary_text = node.summary or node.content
+            edge_desc = (
+                f"{source[:8]} -> {target[:8]}, {data.get('provenance', '')}"
+            )
+            lines.append(f"### {label}  [reached via: {edge_desc}]")
+            if summary_text:
+                lines.append(f"({summary_text})")
+            lines.append("")
+            children = graph.get_children(node.id)
+            fact_children = [
+                c for c in children
+                if c in all_nodes and all_nodes[c].level == 0
+            ]
+            for fc in fact_children[:cfg.MAX_RELATED_FACTS]:
+                lines.append(f"- {all_nodes[fc].content}")
+                rendered_facts += 1
+            if len(fact_children) > cfg.MAX_RELATED_FACTS:
+                lines.append(
+                    f"(+{len(fact_children) - cfg.MAX_RELATED_FACTS} more "
+                    f"facts -- see summary above)"
+                )
+            lines.append("")
 
     if not lines:
         return "No matching facts found in traversal.", metrics

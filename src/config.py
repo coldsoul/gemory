@@ -158,3 +158,7 @@ MAX_BRANCHES_PER_LEVEL: int = int(os.getenv("MAX_BRANCHES_PER_LEVEL", "3"))
 # pruning continues deeper; if still too large, summaries + partial facts
 # are returned and the over-large-node condition is logged.
 MAX_RETURNED_FACTS: int = int(os.getenv("MAX_RETURNED_FACTS", "30"))
+
+# Maximum direct facts pulled from a single related node before
+# falling back to summary-only (expansion reaches a large subtree).
+MAX_RELATED_FACTS: int = int(os.getenv("MAX_RELATED_FACTS", "8"))
