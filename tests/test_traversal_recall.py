@@ -22,7 +22,7 @@ def traversal_graph(tmp_graph_path):
         content="Topic A", embedding=[1.0, 0.0],
         provenance={"source_id": "ra", "label": "Topic A", "timestamp": ""},
         kind="abstraction", label="Topic A",
-        summary="Summary of Topic A.", reach=3,
+        summary="Summary of Topic A.", reach=999,
     )
     store.set_node_attr(root_a, "level", 1)
     for i in range(3):
@@ -37,7 +37,7 @@ def traversal_graph(tmp_graph_path):
         content="Topic B", embedding=[0.0, 1.0],
         provenance={"source_id": "rb", "label": "Topic B", "timestamp": ""},
         kind="abstraction", label="Topic B",
-        summary="Summary of Topic B.", reach=2,
+        summary="Summary of Topic B.", reach=999,
     )
     store.set_node_attr(root_b, "level", 1)
     for i in range(2):
