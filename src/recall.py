@@ -228,11 +228,17 @@ def traverse_recall(
             for n in to_prune
         ]
 
-        try:
-            kept_ids = prune_branches(query, candidates)
-        except Exception:
-            logger.exception("Prune failed at depth %d, keeping all", depth)
-            kept_ids = [c["id"] for c in candidates]
+        # If there's only one candidate, there's nothing to discriminate
+        # against — skip the LLM call and auto-keep it.  A discard on a
+        # single-branch set is a coin flip with zero recovery.
+        if len(candidates) == 1:
+            kept_ids = [candidates[0]["id"]]
+        else:
+            try:
+                kept_ids = prune_branches(query, candidates)
+            except Exception:
+                logger.exception("Prune failed at depth %d, keeping all", depth)
+                kept_ids = [c["id"] for c in candidates]
 
         if len(kept_ids) > cfg.MAX_BRANCHES_PER_LEVEL:
             kept_ids = kept_ids[:cfg.MAX_BRANCHES_PER_LEVEL]
