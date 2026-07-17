@@ -209,7 +209,7 @@ def traverse_recall(
                 children = graph.get_children(kid)
                 next_frontier.update(children)
                 if kid not in kept_tree:
-                    kept_tree[kid] = {"node": all_nodes[kid], "children": []}
+                    kept_tree[kid] = {"node": graph.get_node(kid), "children": []}
                 kept_tree[kid]["children"].extend(children)
                 kept_abstraction_ids.add(kid)
             frontier = list(next_frontier)
@@ -275,7 +275,7 @@ def traverse_recall(
         for kid in kept_ids:
             kept_abstraction_ids.add(kid)
             if kid not in kept_tree:
-                kept_tree[kid] = {"node": all_nodes[kid], "children": []}
+                kept_tree[kid] = {"node": graph.get_node(kid), "children": []}
 
         # Expand: next frontier = pass-through facts + children of kept abstractions.
         next_frontier: set[str] = set(pass_through)
@@ -287,7 +287,7 @@ def traverse_recall(
             children = graph.get_children(kid)
             next_frontier.update(children)
             if kid not in kept_tree:
-                kept_tree[kid] = {"node": all_nodes[kid], "children": []}
+                kept_tree[kid] = {"node": graph.get_node(kid), "children": []}
             kept_tree[kid]["children"].extend(children)
             kept_abstraction_ids.add(kid)
 
