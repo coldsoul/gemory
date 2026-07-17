@@ -209,7 +209,7 @@ def traverse_recall(
                 children = graph.get_children(kid)
                 next_frontier.update(children)
                 if kid not in kept_tree:
-                    kept_tree[kid] = {"node": all_nodes[kid], "children": []}
+                    kept_tree[kid] = {"node": graph.get_node(kid), "children": []}
                 kept_tree[kid]["children"].extend(children)
                 kept_abstraction_ids.add(kid)
             frontier = list(next_frontier)
@@ -228,11 +228,17 @@ def traverse_recall(
             for n in to_prune
         ]
 
-        try:
-            kept_ids = prune_branches(query, candidates)
-        except Exception:
-            logger.exception("Prune failed at depth %d, keeping all", depth)
-            kept_ids = [c["id"] for c in candidates]
+        # If there's only one candidate, there's nothing to discriminate
+        # against — skip the LLM call and auto-keep it.  A discard on a
+        # single-branch set is a coin flip with zero recovery.
+        if len(candidates) == 1:
+            kept_ids = [candidates[0]["id"]]
+        else:
+            try:
+                kept_ids = prune_branches(query, candidates)
+            except Exception:
+                logger.exception("Prune failed at depth %d, keeping all", depth)
+                kept_ids = [c["id"] for c in candidates]
 
         if len(kept_ids) > cfg.MAX_BRANCHES_PER_LEVEL:
             kept_ids = kept_ids[:cfg.MAX_BRANCHES_PER_LEVEL]
@@ -269,7 +275,7 @@ def traverse_recall(
         for kid in kept_ids:
             kept_abstraction_ids.add(kid)
             if kid not in kept_tree:
-                kept_tree[kid] = {"node": all_nodes[kid], "children": []}
+                kept_tree[kid] = {"node": graph.get_node(kid), "children": []}
 
         # Expand: next frontier = pass-through facts + children of kept abstractions.
         next_frontier: set[str] = set(pass_through)
@@ -281,7 +287,7 @@ def traverse_recall(
             children = graph.get_children(kid)
             next_frontier.update(children)
             if kid not in kept_tree:
-                kept_tree[kid] = {"node": all_nodes[kid], "children": []}
+                kept_tree[kid] = {"node": graph.get_node(kid), "children": []}
             kept_tree[kid]["children"].extend(children)
             kept_abstraction_ids.add(kid)
 
