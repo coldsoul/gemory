@@ -87,8 +87,21 @@ def compute_prune_errors(
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Evaluate recall across query set")
+    parser.add_argument("--content", action="store_true",
+                        help="Print the actual returned text for each query arm")
+    parser.add_argument("--query", type=str, metavar="ID",
+                        help="Run only this query (e.g. q07)")
+    args = parser.parse_args()
+
     data = load_queries()
     queries = data["queries"]
+    if args.query:
+        queries = [q for q in queries if q["id"] == args.query]
+        if not queries:
+            print(f"Query {args.query!r} not found in eval/queries.json")
+            sys.exit(1)
     graph = GraphStore(MEMORY_PATH)
     try:
         graph.load()
@@ -232,6 +245,21 @@ def main():
         )
 
         # Aggregate per type
+        if args.content:
+            print(f"\n{'='*60}")
+            print(f"[{qid}] {qtype} — {query_text}")
+            print(f"{'='*60}")
+            print(f"--- FLAT (top-10) ---\n{flat_text[:2000]}")
+            print(f"--- TRAVERSAL (no expansion) ---\n{trav_text[:2000]}")
+            print(f"--- TRAVERSAL (+expansion) ---\n{trav_exp_text[:2000]}")
+            print(f"--- EXPECTED FACTS ---")
+            for eid in expected:
+                try:
+                    print(f"  {graph.get_node(eid).content}")
+                except KeyError:
+                    print(f"  (unresolvable ID: {eid})")
+            print(f"{'='*60}\n")
+
         if qtype not in type_results:
             type_results[qtype] = {
                 "flat_hit": 0, "flat_sum_hit": 0, "trav_hit": 0,
